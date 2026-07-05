@@ -1,0 +1,5 @@
+---
+# The Docker host needs the CA (to verify clients) and the server cert/key.
+vault_certs_install_ca: true
+vault_certs_install_server: true
+vault_certs_install_client: false

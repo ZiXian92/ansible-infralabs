@@ -1,0 +1,17 @@
+# Secrets handed over from vault-infra — NEVER commit
+.vault-approle.json
+
+# Scratch files from molecule/integration's disposable Vault fixture
+molecule/integration/.ephemeral-*
+
+# Ansible / Molecule
+*.retry
+__pycache__/
+*.pyc
+.molecule/
+.cache/
+collections/
+roles/**/files/*.pem
+
+# Retrieved certs / local artifacts
+*.pem

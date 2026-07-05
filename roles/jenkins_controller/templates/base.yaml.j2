@@ -1,0 +1,11 @@
+jenkins:
+  systemMessage: "Managed by Ansible (jenkins_controller role) — do not edit by hand."
+  securityRealm:
+    local:
+      allowsSignup: false
+      users:
+        - id: "{{ jenkins_admin_user }}"
+          password: "{{ jenkins_admin_password }}"
+  authorizationStrategy:
+    loggedInUsersCanDoAnything:
+      allowAnonymousRead: false

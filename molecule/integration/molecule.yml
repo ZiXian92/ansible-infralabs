@@ -1,0 +1,66 @@
+---
+# Hermetic full-stack scenario: provisions its own disposable Vault (a plain sibling
+# container, not a Molecule platform — see prepare.yml/destroy.yml), a docker-host
+# platform serving Podman's Docker-API over mTLS, and a jenkins-controller platform
+# built from the official Jenkins image. Exercises the real docker_host /
+# jenkins_controller / jenkins_docker_cloud roles end-to-end and tears everything
+# down without touching vault-infra's persistent Vault.
+#
+# Run via `../../tasks.ps1 test-integration`, which attaches the executor to an
+# isolated `iaclab-integration` network — kept separate from vault-infra's `iaclab`
+# so this scenario's ephemeral Vault sidecar (alias `vault`) never collides with the
+# real persistent `vault` container.
+#
+# This is the only Molecule scenario in this repo -- fully self-contained, no
+# dependency on the persistent vault-infra Vault.
+dependency:
+  name: galaxy
+  options:
+    requirements-file: requirements.yml
+
+driver:
+  name: podman
+
+platforms:
+  - name: docker-host
+    image: docker.io/geerlingguy/docker-fedora42-ansible:latest
+    privileged: true
+    command: /usr/sbin/init
+    systemd: always
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+    # molecule-podman's create.yml key for attaching a platform to a custom
+    # network at creation time is `network` (singular string), not a `networks`
+    # list -- it also creates the network itself if missing (see prepare.yml,
+    # which still creates it explicitly first so the *executor* has something to
+    # join before Molecule ever runs).
+    network: iaclab-integration
+    groups:
+      - docker_hosts
+
+  - name: jenkins-controller
+    # molecule-podman's create.yml needs `image` on every platform even when a
+    # custom `dockerfile` is given (it templates a Dockerfile FROM this image
+    # unless overridden) -- this must match the Containerfile's own FROM line.
+    image: jenkins/jenkins:lts-jdk21
+    dockerfile: Containerfile
+    pre_build_image: false
+    network: iaclab-integration
+    # By default the driver replaces the image's own CMD with a keep-alive sleep
+    # loop (the usual pattern for bare-OS platforms where Ansible starts the real
+    # service). Here the image's own entrypoint *is* what starts Jenkins, so it
+    # must be left alone -- Ansible still connects fine via `podman exec`.
+    override_command: false
+    groups:
+      - jenkins_controllers
+
+provisioner:
+  name: ansible
+  # No provisioner-level env interpolation here: converge.yml/prepare.yml already
+  # resolve Vault connection values themselves, either via `lookup('env', ...) |
+  # default(...)` (vault_addr, vault_cert_base) or by reading the AppRole creds
+  # prepare.yml captured into a scratch file (vault_role_id/vault_secret_id/
+  # vault_kv_mount) -- nothing needs to be injected at Molecule-config-parse time.
+
+verifier:
+  name: ansible

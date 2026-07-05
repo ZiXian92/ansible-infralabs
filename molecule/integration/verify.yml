@@ -1,0 +1,42 @@
+---
+- name: Verify the Docker Cloud is registered and the mTLS handshake actually works
+  hosts: jenkins_controllers
+  become: false
+  vars:
+    # Matches converge.yml's override for this host (official Jenkins image runs
+    # as the non-root "jenkins" user, which can't create anything under /etc).
+    vault_certs_dir: /var/jenkins_home/pki-mtls
+    docker_host_uri: "tcp://docker-host:2376"
+    jenkins_cloud_name: docker-host
+  tasks:
+    - name: Assert the JCasC Docker Cloud is registered
+      community.general.jenkins_script:
+        script: >-
+          def cloud = jenkins.model.Jenkins.get().clouds.find { it.name == "{{ jenkins_cloud_name }}" };
+          assert cloud != null : "cloud '{{ jenkins_cloud_name }}' not found";
+          println("cloud OK: " + cloud.name)
+        user: admin
+        password: admin
+      # No delegate_to: run directly on jenkins-controller itself, so the
+      # module's default http://localhost:8080 means Jenkins in this container --
+      # not the executor (which has nothing listening on that port/host).
+
+    - name: Confirm an mTLS handshake to the docker-host API actually succeeds
+      ansible.builtin.uri:
+        url: "https://docker-host:2376/_ping"
+        client_cert: "{{ vault_certs_dir }}/client-cert.pem"
+        client_key: "{{ vault_certs_dir }}/client-key.pem"
+        ca_path: "{{ vault_certs_dir }}/ca.pem"
+        status_code: [200]
+      register: _ping
+
+    - name: mTLS ping succeeded
+      ansible.builtin.assert:
+        that:
+          - _ping.status == 200
+        fail_msg: "mTLS handshake/ping to {{ docker_host_uri }} did not return 200"
+
+# Deliberately not exercised here: having Jenkins actually launch a build agent
+# container through the Docker Cloud. docker-host is already a Level-1 privileged
+# container running its own podman engine; a real agent launch would add a fourth
+# nesting level. That path is exercised manually against the real lab environment.

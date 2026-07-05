@@ -1,0 +1,17 @@
+---
+# Vault connection + AppRole credentials.
+#
+# Single source of truth is the environment, populated by tasks.ps1 from the
+# gitignored .vault-approle.json (produced by ../vault-infra). This works the same
+# for a direct `ansible-playbook` run and for a `molecule` run.
+vault_addr:      "{{ lookup('env', 'VAULT_ADDR')      | default('http://vault:8200', true) }}"
+vault_role_id:   "{{ lookup('env', 'VAULT_ROLE_ID')   | default('', true) }}"
+vault_secret_id: "{{ lookup('env', 'VAULT_SECRET_ID') | default('', true) }}"
+vault_kv_mount:  "{{ lookup('env', 'VAULT_KV_MOUNT')  | default('secret', true) }}"
+vault_cert_base: "{{ lookup('env', 'VAULT_CERT_BASE') | default('jenkins/docker-mtls', true) }}"
+
+# Where retrieved PEMs land on the managed host.
+vault_certs_dir: /etc/pki/mtls
+
+# Docker API (Podman Docker-compatible) mTLS endpoint the Jenkins cloud connects to.
+docker_host_tls_port: 2376

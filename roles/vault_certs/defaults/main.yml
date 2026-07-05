@@ -1,0 +1,19 @@
+---
+# --- Vault connection (usually inherited from group_vars/all.yml) ---
+vault_addr: "http://vault:8200"
+vault_role_id: ""
+vault_secret_id: ""
+vault_kv_mount: "secret"
+vault_cert_base: "jenkins/docker-mtls"
+
+# --- What to install on this host (overridden per group) ---
+vault_certs_install_ca: true
+vault_certs_install_server: false
+vault_certs_install_client: false
+
+# --- Where PEMs are written ---
+vault_certs_dir: /etc/pki/mtls
+vault_certs_file_mode_cert: "0644"
+vault_certs_file_mode_key: "0600"
+vault_certs_owner: root
+vault_certs_group: root

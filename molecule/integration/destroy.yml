@@ -1,0 +1,99 @@
+---
+# Custom destroy playbook: tears down everything prepare.yml created (Vault sidecar,
+# scenario network, ephemeral Terraform workspace/state) in addition to the
+# Molecule-managed platform containers themselves — Molecule doesn't know about the
+# sidecar or network, so its own teardown alone would leak them. Called both by
+# Molecule's own `destroy` step (`--destroy=always` in tasks.ps1's
+# `test-integration` action) and, as a fail-safe, by that action's PowerShell
+# `finally` block if Molecule itself crashes first.
+- name: Destroy hermetic fixtures and platforms
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    integration_network: iaclab-integration
+    vault_sidecar_name: molecule-integration-vault
+    kv_mount: secret_integration
+    tf_workspace: molecule-integration
+    tf_image: docker.io/hashicorp/terraform:1.15
+    host_vault_infra_dir: "{{ lookup('env', 'HOST_VAULT_INFRA_DIR') }}"
+    local_vault_infra_mount: /vault-infra
+    scratch_approle_file: "{{ playbook_dir }}/.ephemeral-approle.json"
+
+  tasks:
+    - name: Remove the Molecule platform containers
+      ansible.builtin.command:
+        cmd: "podman rm -f {{ item }}"
+      loop:
+        - docker-host
+        - jenkins-controller
+      register: _rm
+      failed_when: false
+      changed_when: _rm.rc == 0
+
+    - name: terraform destroy in the ephemeral workspace (best-effort)
+      # Must pass the SAME -var overrides prepare.yml's apply used. Without them,
+      # Terraform falls back to variable defaults -- vault_addr defaults to the
+      # same alias name but, critically, vault_init_file defaults to
+      # "../.vault-init.json", the PERSISTENT Vault's real root token (which also
+      # happens to be a valid, readable file at that relative path, since the
+      # whole vault-infra repo is mounted at /work). That silently points this
+      # destroy at the wrong Vault/credentials instead of erroring loudly, and
+      # the ephemeral Vault-side resources never actually get destroyed.
+      ansible.builtin.command:
+        cmd: >
+          podman run --rm --network {{ integration_network }}
+          -v {{ host_vault_infra_dir }}:/work -w /work/config
+          -e TF_WORKSPACE={{ tf_workspace }}
+          {{ tf_image }} destroy -input=false -auto-approve
+          -var vault_addr=http://vault:8200
+          -var kv_mount={{ kv_mount }}
+          -var vault_init_file=/work/.ephemeral-vault-init.json
+      register: _tf_destroy
+      failed_when: false
+      changed_when: _tf_destroy.rc == 0
+      when: host_vault_infra_dir | length > 0
+
+    - name: Switch back to the default Terraform workspace
+      ansible.builtin.command:
+        cmd: >
+          podman run --rm
+          -v {{ host_vault_infra_dir }}:/work -w /work/config
+          {{ tf_image }} workspace select default
+      register: _ws_default
+      failed_when: false
+      changed_when: _ws_default.rc == 0
+      when: host_vault_infra_dir | length > 0
+
+    - name: Delete the ephemeral Terraform workspace
+      ansible.builtin.command:
+        cmd: >
+          podman run --rm
+          -v {{ host_vault_infra_dir }}:/work -w /work/config
+          {{ tf_image }} workspace delete {{ tf_workspace }}
+      register: _ws_delete
+      failed_when: false
+      changed_when: _ws_delete.rc == 0
+      when: host_vault_infra_dir | length > 0
+
+    - name: Remove the ephemeral scratch files
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - "{{ local_vault_infra_mount }}/.ephemeral-vault-init.json"
+        - "{{ scratch_approle_file }}"
+      when: local_vault_infra_mount is defined
+
+    - name: Stop and remove the ephemeral Vault sidecar
+      ansible.builtin.command:
+        cmd: "podman rm -f {{ vault_sidecar_name }}"
+      register: _vault_rm
+      failed_when: false
+      changed_when: _vault_rm.rc == 0
+
+    # The scenario network itself is NOT removed here: this playbook runs *inside*
+    # the executor, which is itself still attached to that network for as long as
+    # its own `podman run` (tasks.ps1's Invoke-Executor) is in flight -- `podman
+    # network rm` can never succeed while that's true. tasks.ps1 removes it after
+    # Invoke-Executor returns and the executor container is gone.

@@ -1,0 +1,4 @@
+---
+collections:
+  - name: community.hashi_vault   # AppRole login + KV v2 reads (vault_certs)
+  - name: community.general       # jenkins_plugin / jenkins_script (jenkins_controller, jenkins_docker_cloud)

@@ -1,0 +1,36 @@
+---
+# Configure this host to serve the Docker-compatible API over mTLS so the Jenkins
+# controller's Docker Cloud can launch build agents on it.
+#
+# podman system service has native mTLS support (Podman 5.7+: --tls-cert/--tls-key/
+# --tls-client-ca) so no TLS-terminating proxy is needed in front of it.
+
+- name: Retrieve CA + server cert/key from Vault
+  ansible.builtin.include_role:
+    name: vault_certs
+
+- name: Ensure Podman is installed
+  ansible.builtin.package:
+    name: podman
+    state: present
+  when: docker_host_manage_packages | bool
+
+- name: Template the mTLS Docker-API systemd unit
+  ansible.builtin.template:
+    src: podman-api-tls.service.j2
+    dest: "/etc/systemd/system/{{ docker_host_service_name }}.service"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: restart docker api
+
+- name: Enable and start the mTLS Docker-API service
+  ansible.builtin.systemd:
+    name: "{{ docker_host_service_name }}"
+    enabled: true
+    state: started
+    daemon_reload: true
+
+# Firewall management is intentionally out of scope: the lab's test containers don't
+# run firewalld, and on a real host, network policy for docker_host_tls_port is a
+# per-environment decision left to the operator.

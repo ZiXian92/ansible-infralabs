@@ -1,0 +1,83 @@
+---
+# Retrieve the mTLS material from Vault using AppRole auth, and write the PEMs
+# this host needs. The Vault reads are delegated to the control node (the executor,
+# which has hvac); the managed host never needs Vault connectivity or hvac.
+
+- name: Assert AppRole credentials are present
+  ansible.builtin.assert:
+    that:
+      - vault_role_id | length > 0
+      - vault_secret_id | length > 0
+    fail_msg: >-
+      vault_role_id / vault_secret_id are empty. Run `../vault-infra/tasks.ps1 up`
+      and make sure tasks.ps1 exported VAULT_ROLE_ID / VAULT_SECRET_ID.
+
+- name: Fetch mTLS secrets from Vault (on the control node)
+  delegate_to: localhost
+  vars:
+    _paths:
+      ca: "{{ vault_cert_base }}/ca"
+      server: "{{ vault_cert_base }}/server"
+      client: "{{ vault_cert_base }}/client"
+  community.hashi_vault.vault_kv2_get:
+    url: "{{ vault_addr }}"
+    auth_method: approle
+    role_id: "{{ vault_role_id }}"
+    secret_id: "{{ vault_secret_id }}"
+    engine_mount_point: "{{ vault_kv_mount }}"
+    path: "{{ _paths[item] }}"
+  register: _vault_certs
+  loop: "{{ ['ca'] + (['server'] if vault_certs_install_server else []) + (['client'] if vault_certs_install_client else []) }}"
+
+- name: Index fetched secrets by name
+  ansible.builtin.set_fact:
+    _certs: "{{ dict(_vault_certs.results | map(attribute='item') | zip(_vault_certs.results | map(attribute='secret'))) }}"
+
+- name: Ensure certificate directory exists
+  ansible.builtin.file:
+    path: "{{ vault_certs_dir }}"
+    state: directory
+    owner: "{{ vault_certs_owner }}"
+    group: "{{ vault_certs_group }}"
+    mode: "0755"
+
+- name: Install CA certificate
+  ansible.builtin.copy:
+    content: "{{ _certs.ca['ca.pem'] }}"
+    dest: "{{ vault_certs_dir }}/ca.pem"
+    owner: "{{ vault_certs_owner }}"
+    group: "{{ vault_certs_group }}"
+    mode: "{{ vault_certs_file_mode_cert }}"
+  when: vault_certs_install_ca | bool
+
+- name: Install server certificate and key
+  ansible.builtin.copy:
+    content: "{{ _certs.server[item.key] }}"
+    dest: "{{ vault_certs_dir }}/{{ item.dest }}"
+    owner: "{{ vault_certs_owner }}"
+    group: "{{ vault_certs_group }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - { key: "cert.pem", dest: "server-cert.pem", mode: "{{ vault_certs_file_mode_cert }}" }
+    - { key: "key.pem", dest: "server-key.pem", mode: "{{ vault_certs_file_mode_key }}" }
+  loop_control:
+    label: "{{ item.dest }}"
+  when: vault_certs_install_server | bool
+  # Only docker_host defines this handler (via `listen`); on hosts that don't include
+  # docker_host in the same play (e.g. jenkins_controller), notifying an unlistened
+  # topic is a harmless no-op.
+  notify: restart docker api
+
+- name: Install client certificate and key
+  ansible.builtin.copy:
+    content: "{{ _certs.client[item.key] }}"
+    dest: "{{ vault_certs_dir }}/{{ item.dest }}"
+    owner: "{{ vault_certs_owner }}"
+    group: "{{ vault_certs_group }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - { key: "cert.pem", dest: "client-cert.pem", mode: "{{ vault_certs_file_mode_cert }}" }
+    - { key: "key.pem", dest: "client-key.pem", mode: "{{ vault_certs_file_mode_key }}" }
+  loop_control:
+    label: "{{ item.dest }}"
+  when: vault_certs_install_client | bool

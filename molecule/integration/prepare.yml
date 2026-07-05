@@ -1,0 +1,136 @@
+---
+# Stand up the fixtures Molecule doesn't manage as platforms: the scenario network,
+# an ephemeral dev-mode Vault sidecar, and the vault-infra Terraform config applied
+# against that sidecar under a dedicated workspace (never the persistent
+# deployment's default workspace/state).
+#
+# Runs inside the executor container, which tasks.ps1's `test-integration` action
+# attaches to the `iaclab-integration` network and mounts vault-infra at
+# /vault-infra (host-writable staging area for the scratch files below) alongside
+# passing HOST_VAULT_INFRA_DIR — the same directory's *host*-absolute path — so the
+# sibling terraform container this play spins up can bind-mount it directly (podman
+# resolves bind-mount sources against the host/podman-machine, not this container's
+# own filesystem, now that the executor talks to the host engine over a mounted
+# socket instead of nesting its own).
+- name: Prepare hermetic fixtures
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    integration_network: iaclab-integration
+    vault_sidecar_name: molecule-integration-vault
+    vault_image: docker.io/hashicorp/vault:2.0.3
+    vault_dev_root_token: molecule-integration-root-token
+    kv_mount: secret_integration
+    tf_workspace: molecule-integration
+    tf_image: docker.io/hashicorp/terraform:1.15
+    host_vault_infra_dir: "{{ lookup('env', 'HOST_VAULT_INFRA_DIR') }}"
+    local_vault_infra_mount: /vault-infra
+    scratch_approle_file: "{{ playbook_dir }}/.ephemeral-approle.json"
+
+  tasks:
+    - name: Assert HOST_VAULT_INFRA_DIR was passed in
+      ansible.builtin.assert:
+        that: host_vault_infra_dir | length > 0
+        fail_msg: >-
+          HOST_VAULT_INFRA_DIR is empty. This must be set by
+          ../../tasks.ps1 test-integration to the host-absolute path of
+          ../../../vault-infra.
+
+    - name: Ensure the scenario network exists
+      ansible.builtin.command:
+        cmd: "podman network create {{ integration_network }}"
+      register: _net
+      failed_when:
+        - _net.rc != 0
+        - "'already exists' not in _net.stderr"
+      changed_when: _net.rc == 0
+
+    # Molecule attaches both platforms to this network directly at container
+    # creation time (molecule.yml's `network:` key on each platform) -- no
+    # separate `podman network connect` step here. That command doesn't work
+    # under this host's rootless "pasta" networking mode anyway ("pasta" is not
+    # supported: invalid network mode`), which is precisely why attaching at
+    # creation time (not after the fact) is the only reliable approach.
+
+    - name: Start the ephemeral Vault sidecar (dev mode, destroyed with the scenario)
+      ansible.builtin.command:
+        cmd: >
+          podman run -d --rm --name {{ vault_sidecar_name }}
+          --network {{ integration_network }} --network-alias vault
+          -e VAULT_DEV_ROOT_TOKEN_ID={{ vault_dev_root_token }}
+          -e VAULT_DEV_LISTEN_ADDRESS=0.0.0.0:8200
+          {{ vault_image }} server -dev
+      register: _vault_start
+      failed_when:
+        - _vault_start.rc != 0
+        - "'already in use' not in _vault_start.stderr"
+      changed_when: _vault_start.rc == 0
+
+    - name: Wait for the ephemeral Vault to answer health checks
+      ansible.builtin.uri:
+        url: "http://vault:8200/v1/sys/health"
+        status_code: [200]
+      register: _vault_health
+      until: _vault_health.status == 200
+      retries: 30
+      delay: 2
+
+    - name: Write the scratch Vault init-file (feeds versions.tf's vault_init_file var)
+      ansible.builtin.copy:
+        dest: "{{ local_vault_infra_mount }}/.ephemeral-vault-init.json"
+        content: "{{ {'root_token': vault_dev_root_token} | to_nice_json }}"
+        mode: "0600"
+
+    - name: terraform init (ephemeral workspace)
+      ansible.builtin.command:
+        cmd: >
+          podman run --rm --network {{ integration_network }}
+          -v {{ host_vault_infra_dir }}:/work -w /work/config
+          {{ tf_image }} init -input=false
+      changed_when: true
+
+    - name: Select or create the ephemeral Terraform workspace
+      ansible.builtin.command:
+        cmd: >
+          podman run --rm --network {{ integration_network }}
+          -v {{ host_vault_infra_dir }}:/work -w /work/config
+          {{ tf_image }} workspace new {{ tf_workspace }}
+      register: _ws_new
+      failed_when:
+        - _ws_new.rc != 0
+        - "'already exists' not in _ws_new.stderr"
+      changed_when: _ws_new.rc == 0
+
+    - name: terraform apply against the ephemeral Vault sidecar
+      ansible.builtin.command:
+        cmd: >
+          podman run --rm --network {{ integration_network }}
+          -v {{ host_vault_infra_dir }}:/work -w /work/config
+          -e TF_WORKSPACE={{ tf_workspace }}
+          {{ tf_image }} apply -input=false -auto-approve
+          -var vault_addr=http://vault:8200
+          -var kv_mount={{ kv_mount }}
+          -var vault_init_file=/work/.ephemeral-vault-init.json
+      changed_when: true
+
+    - name: Read the ephemeral AppRole creds via terraform output
+      ansible.builtin.command:
+        cmd: >
+          podman run --rm --network {{ integration_network }}
+          -v {{ host_vault_infra_dir }}:/work -w /work/config
+          -e TF_WORKSPACE={{ tf_workspace }}
+          {{ tf_image }} output -json
+      register: _tf_output
+      changed_when: false
+
+    - name: Persist the AppRole creds for converge.yml (separate ansible-playbook run)
+      vars:
+        _tf_outputs: "{{ _tf_output.stdout | from_json }}"
+      ansible.builtin.copy:
+        dest: "{{ scratch_approle_file }}"
+        content: >-
+          {{ {'vault_role_id': _tf_outputs.role_id.value,
+              'vault_secret_id': _tf_outputs.secret_id.value,
+              'vault_kv_mount': kv_mount} | to_nice_json }}
+        mode: "0600"

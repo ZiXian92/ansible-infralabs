@@ -1,0 +1,11 @@
+jenkins:
+  systemMessage: "molecule/integration test controller — do not edit by hand."
+  securityRealm:
+    local:
+      allowsSignup: false
+      users:
+        - id: admin
+          password: admin
+  authorizationStrategy:
+    loggedInUsersCanDoAnything:
+      allowAnonymousRead: false

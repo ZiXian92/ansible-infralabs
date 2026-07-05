@@ -1,0 +1,62 @@
+---
+# Molecule runs prepare.yml and converge.yml as separate ansible-playbook
+# invocations, so the AppRole creds prepare.yml captured via `terraform output`
+# don't carry over as facts — read them back from the scratch file it wrote
+# (gitignored; see ../../.gitignore) instead, same idea as vault_certs reading
+# VAULT_ROLE_ID/VAULT_SECRET_ID from the environment in a real run.
+- name: Configure the docker-host
+  hosts: docker_hosts
+  become: false # molecule podman containers connect as root already
+  vars:
+    _approle: "{{ lookup('file', playbook_dir + '/.ephemeral-approle.json') | from_json }}"
+    vault_addr: "{{ lookup('env', 'VAULT_ADDR') | default('http://vault:8200', true) }}"
+    vault_role_id: "{{ _approle.vault_role_id }}"
+    vault_secret_id: "{{ _approle.vault_secret_id }}"
+    vault_kv_mount: "{{ _approle.vault_kv_mount }}"
+    vault_cert_base: "{{ lookup('env', 'VAULT_CERT_BASE') | default('jenkins/docker-mtls', true) }}"
+    # Matches inventory/group_vars/docker_hosts.yml: the docker-host needs the CA
+    # (to verify clients) and the server cert/key, not the client cert.
+    vault_certs_install_server: true
+    vault_certs_install_client: false
+  roles:
+    - docker_host
+
+- name: Configure the jenkins-controller and its Docker Cloud
+  hosts: jenkins_controllers
+  become: false
+  vars:
+    _approle: "{{ lookup('file', playbook_dir + '/.ephemeral-approle.json') | from_json }}"
+    vault_addr: "{{ lookup('env', 'VAULT_ADDR') | default('http://vault:8200', true) }}"
+    vault_role_id: "{{ _approle.vault_role_id }}"
+    vault_secret_id: "{{ _approle.vault_secret_id }}"
+    vault_kv_mount: "{{ _approle.vault_kv_mount }}"
+    vault_cert_base: "{{ lookup('env', 'VAULT_CERT_BASE') | default('jenkins/docker-mtls', true) }}"
+    # Matches inventory/group_vars/jenkins_controllers.yml: the controller needs
+    # the CA and the client cert/key to authenticate to the Docker host's mTLS API.
+    vault_certs_install_client: true
+    # The official Jenkins image runs as the non-root "jenkins" user (unlike
+    # docker-host's image, which connects as root), so it can't create a new
+    # directory under /etc (root-owned) at all, regardless of desired final
+    # ownership. Use a path under /var/jenkins_home instead, which the image
+    # already chowns to jenkins -- avoids needing become/sudo entirely.
+    vault_certs_dir: /var/jenkins_home/pki-mtls
+    vault_certs_owner: jenkins
+    vault_certs_group: jenkins
+    jenkins_cloud_certs_dir: /var/jenkins_home/pki-mtls
+    # Matches the Containerfile's CASC_JENKINS_CONFIG (the from-scratch defaults
+    # of both roles point at /var/lib/jenkins/casc_configs, jenkins_controller's
+    # own real install path -- not this test image's).
+    jenkins_casc_dir: /var/jenkins_home/casc_configs
+    jenkins_cloud_casc_dir: /var/jenkins_home/casc_configs
+    jenkins_manage_packages: false # base image already ships Jenkins + plugins + base JCasC
+    # Docker Cloud endpoint + agent image: no longer a role default (see
+    # roles/jenkins_docker_cloud/defaults/main.yml) -- mirrors
+    # inventory/group_vars/jenkins_controllers.yml's derivation, using this
+    # scenario's own synthetic inventory (Molecule doesn't load group_vars/all.yml,
+    # so docker_host_tls_port is set here rather than looked up from there).
+    docker_host_tls_port: 2376
+    jenkins_cloud_docker_host_uri: "tcp://{{ groups['docker_hosts'][0] }}:{{ docker_host_tls_port }}"
+    jenkins_cloud_agent_image: jenkins/inbound-agent:latest
+  roles:
+    - jenkins_controller
+    - jenkins_docker_cloud

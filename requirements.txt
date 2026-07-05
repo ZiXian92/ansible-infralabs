@@ -1,0 +1,9 @@
+# Python deps baked into the executor image.
+# No upper bound on ansible-core: quay.io/podman/stable tracks current Fedora, whose
+# python3 version moves forward over time and requires a matching-enough ansible-core
+# (e.g. Python 3.14 needs ansible-core>=2.20). Pin a floor only; let pip pick a
+# version compatible with whatever Python the base image currently ships.
+ansible-core>=2.16
+molecule>=6.0
+molecule-plugins[podman]>=23.5
+hvac>=2.0          # HashiCorp Vault client used by community.hashi_vault

@@ -1,0 +1,24 @@
+---
+# Docker Cloud registration on the Jenkins controller.
+#
+# jenkins_cloud_docker_host_uri and jenkins_cloud_agent_image are deliberately
+# NOT defaulted here: which Docker host to connect to and which agent image to
+# launch are per-deployment configuration, not sensible generic role defaults.
+# Real runs set them in inventory/group_vars/jenkins_controllers.yml; the
+# molecule/integration scenario sets them as play vars in converge.yml.
+jenkins_cloud_name: docker-host
+jenkins_cloud_certs_dir: /etc/pki/mtls                       # client cert/key + CA (from vault_certs)
+
+# Where JCasC config files live (matches jenkins_controller's jenkins_casc_dir
+# default of "{{ jenkins_home }}/casc_configs" with jenkins_home=/var/lib/jenkins).
+# This role writes an additional fragment here; JCasC merges every file in the
+# directory alphabetically, so it's picked up alongside jenkins_controller's base
+# config (or the base config baked into the molecule/integration test image).
+jenkins_cloud_casc_dir: /var/lib/jenkins/casc_configs
+
+# The Jenkins "docker-server" credential (client key/cert/ca) the cloud uses.
+jenkins_cloud_credentials_id: docker-host-mtls
+
+# Agent template launched on the Docker host.
+jenkins_cloud_agent_labels: "docker linux"
+jenkins_cloud_agent_instance_cap: 4

@@ -1,0 +1,12 @@
+---
+# Docker-compatible API endpoint served by Podman, secured with mTLS.
+docker_host_tls_port: 2376
+docker_host_certs_dir: /etc/pki/mtls          # produced by the vault_certs role
+docker_host_api_user: root                    # rootful podman API for Jenkins agents
+
+# Whether this role installs the podman package. False when the target image
+# already ships podman (e.g. a pre-built test container).
+docker_host_manage_packages: true
+
+# systemd unit that runs `podman system service` over a TLS TCP socket.
+docker_host_service_name: podman-api-tls

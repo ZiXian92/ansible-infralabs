@@ -1,0 +1,15 @@
+[Unit]
+Description=Podman Docker-compatible API over mTLS (Jenkins Docker Cloud)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/bin/podman system service --time=0 \
+  --tls-cert={{ docker_host_certs_dir }}/server-cert.pem \
+  --tls-key={{ docker_host_certs_dir }}/server-key.pem \
+  --tls-client-ca={{ docker_host_certs_dir }}/ca.pem \
+  tcp://0.0.0.0:{{ docker_host_tls_port }}
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

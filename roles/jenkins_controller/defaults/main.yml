@@ -1,0 +1,20 @@
+---
+jenkins_http_port: 8080
+jenkins_home: /var/lib/jenkins
+jenkins_manage_packages: true
+
+# Lab-grade local admin account created via JCasC (skips the setup wizard). Fine for
+# an isolated lab/test controller; a real deployment should source these from Vault
+# or an external identity provider instead.
+jenkins_admin_user: admin
+jenkins_admin_password: admin
+
+# Plugins required for the Docker Cloud use case.
+jenkins_plugins:
+  - docker-plugin
+  - docker-java-api
+  - configuration-as-code
+
+# Jenkins Configuration-as-Code (JCasC) is the intended mechanism for declaring
+# the controller config, including the Docker Cloud (see jenkins_docker_cloud).
+jenkins_casc_dir: "{{ jenkins_home }}/casc_configs"

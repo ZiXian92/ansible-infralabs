@@ -1,0 +1,23 @@
+# Ansible + Molecule executor.
+#
+# Based on quay.io/podman/stable so the `podman` CLI is available (tasks.ps1 mounts
+# the host's rootless podman socket into this container at run time and sets
+# CONTAINER_HOST, so this podman -- and Molecule's podman driver -- talk to the
+# HOST engine; everything created lands as a sibling container, not nested here).
+# This is the reproducible "control node" — Ansible has no native Windows control
+# node, so the playbook and its tests always run from here (locally and, later, in CI).
+FROM quay.io/podman/stable
+
+# hvac (for community.hashi_vault) + openssl for local cert inspection.
+RUN dnf -y install python3-pip openssl && dnf clean all
+
+COPY requirements.txt /tmp/requirements.txt
+RUN pip3 install --no-cache-dir -r /tmp/requirements.txt
+
+COPY requirements.yml /tmp/requirements.yml
+RUN ansible-galaxy collection install -r /tmp/requirements.yml
+
+# The repo is bind-mounted here at run time (see tasks.ps1).
+WORKDIR /work
+
+CMD ["bash"]

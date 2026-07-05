@@ -1,0 +1,7 @@
+---
+galaxy_info:
+  role_name: jenkins_controller
+  description: Install and configure a Jenkins controller (with Docker Cloud plugins).
+  license: MIT
+  min_ansible_version: "2.16"
+dependencies: []

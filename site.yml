@@ -1,0 +1,16 @@
+---
+# Top-level playbook for a real run against the static inventory.
+# (Molecule uses its own scenario plays under molecule/.)
+
+- name: Configure the Docker host (Podman Docker-API over mTLS)
+  hosts: docker_hosts
+  become: true
+  roles:
+    - docker_host
+
+- name: Configure the Jenkins controller and its Docker Cloud
+  hosts: jenkins_controllers
+  become: true
+  roles:
+    - jenkins_controller
+    - jenkins_docker_cloud

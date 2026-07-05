@@ -1,0 +1,25 @@
+# Test image for the molecule/integration jenkins-controller platform.
+#
+# Starts from the official Jenkins image rather than a from-scratch install: this
+# scenario is scoped to exercising the Docker Cloud/JCasC registration path (see
+# roles/jenkins_docker_cloud), not jenkins_controller's from-bare-OS install logic
+# (that path runs for real via site.yml against actual hosts and isn't covered by
+# this container test). Plugins + a base JCasC config (local admin/admin realm,
+# matching roles/jenkins_controller/defaults/main.yml's lab-grade defaults) are
+# baked in at build time; roles/jenkins_docker_cloud adds a second JCasC fragment
+# and reloads it live during converge.
+FROM jenkins/jenkins:lts-jdk21
+
+USER root
+# Ansible needs a Python interpreter on every managed node (this image ships none).
+RUN apt-get update && apt-get install -y --no-install-recommends python3 && rm -rf /var/lib/apt/lists/*
+RUN jenkins-plugin-cli --plugins docker-plugin docker-java-api configuration-as-code
+
+RUN mkdir -p /var/jenkins_home/casc_configs \
+    && chown jenkins:jenkins /var/jenkins_home/casc_configs
+COPY --chown=jenkins:jenkins files/casc-base.yaml /var/jenkins_home/casc_configs/010-base.yaml
+
+ENV JAVA_OPTS="-Djenkins.install.runSetupWizard=false"
+ENV CASC_JENKINS_CONFIG=/var/jenkins_home/casc_configs
+
+USER jenkins
