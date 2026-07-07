@@ -1,7 +1,12 @@
 [Unit]
 Description=Podman Docker-compatible API over mTLS (Jenkins Docker Cloud)
-After=network-online.target
-Wants=network-online.target
+# dbus.service (not just dbus.socket): containers created through this API use
+# crun's systemd cgroup manager, which talks to the message bus directly --
+# socket-activation alone left a narrow window (seen in testing as "crun:
+# cannot open sd-bus") where the very first container creation raced the
+# broker's own startup.
+After=network-online.target dbus.service
+Wants=network-online.target dbus.service
 
 [Service]
 ExecStart=/usr/bin/podman system service --time=0 \
