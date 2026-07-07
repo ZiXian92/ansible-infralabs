@@ -1,0 +1,45 @@
+---
+argument_specs:
+  main:
+    short_description: Register a Docker Cloud (mTLS) on the Jenkins controller via JCasC.
+    description: >-
+      Assumes jenkins_controller has already run on this host (jenkins_controller_http_port,
+      jenkins_controller_admin_user, jenkins_controller_admin_password are consumed from that
+      role's variables) and that vault_certs has installed the client cert/key/CA used here.
+    options:
+      jenkins_docker_cloud_docker_host_uri:
+        type: str
+        required: true
+        description: Docker-compatible API URI to connect to, e.g. tcp://docker-host:2376. Deliberately has no default -- per-deployment configuration.
+      jenkins_docker_cloud_agent_image:
+        type: str
+        required: true
+        description: Container image launched as the Jenkins build agent. Deliberately has no default -- per-deployment configuration.
+      jenkins_docker_cloud_agent_network:
+        type: str
+        required: false
+        description: Docker network mode for launched agent containers. When unset, the JCasC template omits the `network:` key entirely.
+      jenkins_docker_cloud_name:
+        type: str
+        default: docker-host
+        description: JCasC cloud display name.
+      jenkins_docker_cloud_certs_dir:
+        type: path
+        default: /etc/pki/mtls
+        description: Directory where the client cert/key/CA installed by vault_certs already live on this host.
+      jenkins_docker_cloud_casc_dir:
+        type: path
+        default: /var/lib/jenkins/casc_configs
+        description: JCasC directory this role writes its Docker Cloud config fragment into.
+      jenkins_docker_cloud_credentials_id:
+        type: str
+        default: docker-host-mtls
+        description: Jenkins credential ID for the x509 client certificate.
+      jenkins_docker_cloud_agent_labels:
+        type: str
+        default: "docker linux"
+        description: Label string assigned to the agent template.
+      jenkins_docker_cloud_agent_instance_cap:
+        type: int
+        default: 4
+        description: Maximum concurrent agent containers.

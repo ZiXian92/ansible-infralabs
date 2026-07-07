@@ -1,0 +1,59 @@
+---
+argument_specs:
+  main:
+    short_description: Fetch mTLS certificates from Vault and install them locally.
+    options:
+      vault_certs_addr:
+        type: str
+        default: "http://vault:8200"
+        description: Vault API address.
+      vault_certs_role_id:
+        type: str
+        default: ""
+        no_log: true
+        description: Vault AppRole role_id used to authenticate. Must be non-empty (asserted).
+      vault_certs_secret_id:
+        type: str
+        default: ""
+        no_log: true
+        description: Vault AppRole secret_id used to authenticate. Must be non-empty (asserted).
+      vault_certs_kv_mount:
+        type: str
+        default: secret
+        description: Vault KV v2 mount point the cert secrets are read from.
+      vault_certs_cert_base:
+        type: str
+        default: jenkins/docker-mtls
+        description: Base KV path under the mount where cert secrets are stored.
+      vault_certs_install_ca:
+        type: bool
+        default: true
+        description: Whether to write ca.pem.
+      vault_certs_install_server:
+        type: bool
+        default: false
+        description: Whether to write the server cert/key.
+      vault_certs_install_client:
+        type: bool
+        default: false
+        description: Whether to write the client cert/key.
+      vault_certs_dir:
+        type: path
+        default: /etc/pki/mtls
+        description: Output directory for the installed PEM files.
+      vault_certs_file_mode_cert:
+        type: str
+        default: "0644"
+        description: File mode applied to certificate files.
+      vault_certs_file_mode_key:
+        type: str
+        default: "0600"
+        description: File mode applied to private key files.
+      vault_certs_owner:
+        type: str
+        default: root
+        description: Owner of the certs directory and files.
+      vault_certs_group:
+        type: str
+        default: root
+        description: Group of the certs directory and files.

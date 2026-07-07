@@ -1,0 +1,25 @@
+---
+argument_specs:
+  main:
+    short_description: Serve the Docker-compatible API (Podman) over mTLS for Jenkins agents.
+    options:
+      docker_host_tls_port:
+        type: int
+        default: 2376
+        description: TCP port the podman mTLS Docker-compatible API listens on.
+      docker_host_certs_dir:
+        type: path
+        default: /etc/pki/mtls
+        description: Directory holding the server cert/key/CA (produced by the vault_certs role).
+      docker_host_api_user:
+        type: str
+        default: root
+        description: Rootful podman API user the service runs as, for Jenkins agents.
+      docker_host_manage_packages:
+        type: bool
+        default: true
+        description: Whether this role installs the podman package. Set false when the target image already ships podman (e.g. a pre-built test container).
+      docker_host_service_name:
+        type: str
+        default: podman-api-tls
+        description: Name of the systemd unit that runs `podman system service` over a TLS TCP socket.

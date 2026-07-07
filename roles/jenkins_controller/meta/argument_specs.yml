@@ -1,0 +1,38 @@
+---
+argument_specs:
+  main:
+    short_description: Install and configure a Jenkins controller via JCasC.
+    options:
+      jenkins_controller_http_port:
+        type: int
+        default: 8080
+        description: Port Jenkins listens on; used for the post-install health check.
+      jenkins_controller_home:
+        type: path
+        default: /var/lib/jenkins
+        description: Jenkins home directory.
+      jenkins_controller_manage_packages:
+        type: bool
+        default: true
+        description: Whether this role performs a from-scratch install (Java/RPM repo/Jenkins) vs. assuming a pre-built image.
+      jenkins_controller_admin_user:
+        type: str
+        default: admin
+        description: Local admin account created via JCasC (skips the setup wizard).
+      jenkins_controller_admin_password:
+        type: str
+        default: admin
+        no_log: true
+        description: Password for the local admin account. Lab-grade default; a real deployment should source this from Vault or an external identity provider.
+      jenkins_controller_plugins:
+        type: list
+        elements: str
+        default:
+          - docker-plugin
+          - docker-java-api
+          - configuration-as-code
+        description: Plugins to install, required for the Docker Cloud use case.
+      jenkins_controller_casc_dir:
+        type: path
+        default: "{{ jenkins_controller_home }}/casc_configs"
+        description: Directory JCasC merges configuration fragments from, including the Docker Cloud config written by jenkins_docker_cloud.
