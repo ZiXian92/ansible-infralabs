@@ -28,3 +28,6 @@ jenkins:
             instanceCapStr: "{{ jenkins_cloud_agent_instance_cap }}"
             dockerTemplateBase:
               image: "{{ jenkins_cloud_agent_image }}"
+{% if jenkins_cloud_agent_network is defined %}
+              network: "{{ jenkins_cloud_agent_network }}"
+{% endif %}
