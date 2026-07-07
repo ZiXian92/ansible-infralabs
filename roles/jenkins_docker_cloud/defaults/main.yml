@@ -22,3 +22,12 @@ jenkins_cloud_credentials_id: docker-host-mtls
 # Agent template launched on the Docker host.
 jenkins_cloud_agent_labels: "docker linux"
 jenkins_cloud_agent_instance_cap: 4
+
+# jenkins_cloud_agent_network (optional, no default -- template omits the
+# JCasC `network:` key entirely unless set): the docker network mode for
+# launched agent containers. molecule/integration sets this to "none", since
+# the "attach" connector never needs the agent container to have network
+# access of its own (Jenkins talks to it via `docker exec` over the already-
+# established Docker-API connection) -- and nested Podman-in-Podman test hosts
+# can fail to set up a normal bridge network at all (netavark needs nftables/
+# NAT kernel support that a nested container's host kernel may not expose).
