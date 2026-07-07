@@ -9,5 +9,5 @@ vault_certs_install_client: true
 # default (see roles/jenkins_docker_cloud/defaults/main.yml). The URI is derived
 # from the docker_hosts group + docker_host_tls_port (group_vars/all.yml)
 # instead of a second hardcoded "docker-host:2376" literal.
-jenkins_cloud_docker_host_uri: "tcp://{{ groups['docker_hosts'][0] }}:{{ docker_host_tls_port }}"
-jenkins_cloud_agent_image: jenkins/inbound-agent:latest
+jenkins_docker_cloud_docker_host_uri: "tcp://{{ groups['docker_hosts'][0] }}:{{ docker_host_tls_port }}"
+jenkins_docker_cloud_agent_image: jenkins/inbound-agent:latest

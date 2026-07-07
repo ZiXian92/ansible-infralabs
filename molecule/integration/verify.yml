@@ -7,13 +7,13 @@
     # as the non-root "jenkins" user, which can't create anything under /etc).
     vault_certs_dir: /var/jenkins_home/pki-mtls
     docker_host_uri: "tcp://docker-host:2376"
-    jenkins_cloud_name: docker-host
+    jenkins_docker_cloud_name: docker-host
   tasks:
     - name: Assert the JCasC Docker Cloud is registered
       community.general.jenkins_script:
         script: >-
-          def cloud = jenkins.model.Jenkins.get().clouds.find { it.name == "{{ jenkins_cloud_name }}" };
-          assert cloud != null : "cloud '{{ jenkins_cloud_name }}' not found";
+          def cloud = jenkins.model.Jenkins.get().clouds.find { it.name == "{{ jenkins_docker_cloud_name }}" };
+          assert cloud != null : "cloud '{{ jenkins_docker_cloud_name }}' not found";
           println("cloud OK: " + cloud.name)
         user: admin
         password: admin
@@ -30,7 +30,7 @@
         status_code: [200]
       register: _ping
 
-    - name: mTLS ping succeeded
+    - name: Confirm the mTLS ping succeeded
       ansible.builtin.assert:
         that:
           - _ping.status == 200
@@ -40,17 +40,17 @@
   hosts: docker_hosts
   become: false
   vars:
-    # Must match converge.yml's jenkins_cloud_agent_image -- this checks that its
+    # Must match converge.yml's jenkins_docker_cloud_agent_image -- this checks that its
     # pre-pull task actually landed the image in this host's local Podman storage,
     # the same storage the mTLS Docker-API (podman system service) serves from. If
     # this ever fails, the Docker Cloud would fall back to pulling from Docker Hub
     # live during the job below instead of using a local image, which is slower and
     # depends on this nested host's own network/DNS egress.
-    jenkins_cloud_agent_image: docker.io/jenkins/inbound-agent:latest
+    jenkins_docker_cloud_agent_image: docker.io/jenkins/inbound-agent:latest
   tasks:
     - name: Assert the agent image exists locally (not just resolvable from Docker Hub)
       ansible.builtin.command:
-        cmd: "podman image exists {{ jenkins_cloud_agent_image }}"
+        cmd: "podman image exists {{ jenkins_docker_cloud_agent_image }}"
       changed_when: false
 
 - name: Run a real Pipeline job on the Docker Cloud agent and confirm it succeeds
@@ -60,7 +60,7 @@
     jenkins_hello_job_name: hello-docker-agent
     jenkins_hello_message: "Hello from the docker-host Jenkins agent"
     # Matches one of the labels on jenkins_docker_cloud's template
-    # (jenkins_cloud_agent_labels default: "docker linux"). The controller's own
+    # (jenkins_docker_cloud_agent_labels default: "docker linux"). The controller's own
     # built-in node carries none of these labels, so satisfying this constraint is
     # only possible by Jenkins actually provisioning an agent through the Docker
     # Cloud -- there is no other node it could silently fall back to.

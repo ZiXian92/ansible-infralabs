@@ -82,7 +82,7 @@
         content: "{{ {'root_token': vault_dev_root_token} | to_nice_json }}"
         mode: "0600"
 
-    - name: terraform init (ephemeral workspace)
+    - name: Terraform init (ephemeral workspace)
       ansible.builtin.command:
         cmd: >
           podman run --rm --network {{ integration_network }}
@@ -102,7 +102,7 @@
         - "'already exists' not in _ws_new.stderr"
       changed_when: _ws_new.rc == 0
 
-    - name: terraform apply against the ephemeral Vault sidecar
+    - name: Terraform apply against the ephemeral Vault sidecar
       ansible.builtin.command:
         cmd: >
           podman run --rm --network {{ integration_network }}

@@ -4,8 +4,8 @@ jenkins:
     local:
       allowsSignup: false
       users:
-        - id: "{{ jenkins_admin_user }}"
-          password: "{{ jenkins_admin_password }}"
+        - id: "{{ jenkins_controller_admin_user }}"
+          password: "{{ jenkins_controller_admin_password }}"
   authorizationStrategy:
     loggedInUsersCanDoAnything:
       allowAnonymousRead: false

@@ -8,12 +8,12 @@ authenticate to the Docker host.
 
 **Implemented:**
 - Cert retrieval wiring.
-- When `jenkins_manage_packages` (default `true`, the real-host path used by
+- When `jenkins_controller_manage_packages` (default `true`, the real-host path used by
   `site.yml`): Java + Jenkins LTS from the official RPM repo, setup wizard disabled,
-  a base JCasC config (local security realm + `jenkins_admin_user`/
-  `jenkins_admin_password` — lab-grade, see `defaults/main.yml`), and the plugins in
-  `jenkins_plugins`.
-- `molecule/integration` sets `jenkins_manage_packages: false` because its
+  a base JCasC config (local security realm + `jenkins_controller_admin_user`/
+  `jenkins_controller_admin_password` — lab-grade, see `defaults/main.yml`), and the plugins in
+  `jenkins_controller_plugins`.
+- `molecule/integration` sets `jenkins_controller_manage_packages: false` because its
   jenkins-controller platform is built from the official Jenkins container image,
   which already bakes Jenkins, the plugins, and a base JCasC file — that scenario
   only exercises the Docker Cloud registration path.

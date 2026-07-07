@@ -1,6 +1,7 @@
 ---
 galaxy_info:
   role_name: vault_certs
+  author: Zi Xian Qua
   description: Retrieve mTLS material (CA/server/client) from HashiCorp Vault via AppRole and install PEMs.
   license: MIT
   min_ansible_version: "2.16"

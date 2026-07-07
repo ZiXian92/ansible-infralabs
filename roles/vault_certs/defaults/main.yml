@@ -1,10 +1,10 @@
 ---
 # --- Vault connection (usually inherited from group_vars/all.yml) ---
-vault_addr: "http://vault:8200"
-vault_role_id: ""
-vault_secret_id: ""
-vault_kv_mount: "secret"
-vault_cert_base: "jenkins/docker-mtls"
+vault_certs_addr: "http://vault:8200"
+vault_certs_role_id: ""
+vault_certs_secret_id: ""
+vault_certs_kv_mount: "secret"
+vault_certs_cert_base: "jenkins/docker-mtls"
 
 # --- What to install on this host (overridden per group) ---
 vault_certs_install_ca: true

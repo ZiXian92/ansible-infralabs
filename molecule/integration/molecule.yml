@@ -58,9 +58,10 @@ provisioner:
   name: ansible
   # No provisioner-level env interpolation here: converge.yml/prepare.yml already
   # resolve Vault connection values themselves, either via `lookup('env', ...) |
-  # default(...)` (vault_addr, vault_cert_base) or by reading the AppRole creds
-  # prepare.yml captured into a scratch file (vault_role_id/vault_secret_id/
-  # vault_kv_mount) -- nothing needs to be injected at Molecule-config-parse time.
+  # default(...)` (vault_certs_addr, vault_certs_cert_base) or by reading the AppRole
+  # creds prepare.yml captured into a scratch file (vault_certs_role_id/
+  # vault_certs_secret_id/vault_certs_kv_mount) -- nothing needs to be injected at
+  # Molecule-config-parse time.
 
 verifier:
   name: ansible

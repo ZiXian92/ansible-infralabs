@@ -104,6 +104,6 @@ podman run --rm "${RUN_ARGS[@]}" molecule test --destroy=always -s integration
 ## Status
 All four roles are implemented: `vault_certs`, `docker_host` (native Podman mTLS via
 `podman system service`), `jenkins_controller` (from-scratch install for real hosts,
-guarded by `jenkins_manage_packages`), and `jenkins_docker_cloud` (JCasC Docker Cloud
+guarded by `jenkins_controller_manage_packages`), and `jenkins_docker_cloud` (JCasC Docker Cloud
 registration with live reload). See
 [`../docs/architecture.md`](../docs/architecture.md#5-roadmap) for what's next.

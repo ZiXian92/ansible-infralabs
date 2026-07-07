@@ -1,6 +1,7 @@
 ---
 galaxy_info:
   role_name: docker_host
+  author: Zi Xian Qua
   description: Serve the Docker-compatible API (Podman) over mTLS for Jenkins agents.
   license: MIT
   min_ansible_version: "2.16"

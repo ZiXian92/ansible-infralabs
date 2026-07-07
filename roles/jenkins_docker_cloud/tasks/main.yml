@@ -1,7 +1,7 @@
 ---
 # Register the Docker host as a Docker Cloud on the Jenkins controller, connecting
 # over mTLS with the client cert/key retrieved from Vault (by jenkins_controller's
-# vault_certs include, already installed at jenkins_cloud_certs_dir on this host).
+# vault_certs include, already installed at jenkins_docker_cloud_certs_dir on this host).
 # Mechanism: JCasC. This role only adds an additional YAML fragment; JCasC merges
 # every file in its config directory alphabetically, so it layers on top of the
 # base config from jenkins_controller (or the one baked into the
@@ -9,43 +9,45 @@
 
 - name: Wait for Jenkins to accept connections
   # jenkins_controller only waits for this itself on the from-scratch install path
-  # (jenkins_manage_packages); when Jenkins comes from a pre-built image/container
+  # (jenkins_controller_manage_packages); when Jenkins comes from a pre-built image/container
   # instead, this is the first task in the play that needs it actually reachable.
   ansible.builtin.uri:
-    url: "http://localhost:{{ jenkins_http_port }}/login"
+    url: "http://localhost:{{ jenkins_controller_http_port }}/login"
     status_code: 200
-  register: _jenkins_up
-  until: _jenkins_up.status == 200
+  register: _jenkins_docker_cloud_up
+  until: _jenkins_docker_cloud_up.status == 200
   retries: 30
   delay: 5
 
 - name: Slurp the CA + client cert/key already installed on this host
   ansible.builtin.slurp:
-    src: "{{ jenkins_cloud_certs_dir }}/{{ item }}"
+    src: "{{ jenkins_docker_cloud_certs_dir }}/{{ item }}"
   loop:
     - ca.pem
     - client-cert.pem
     - client-key.pem
-  register: _cloud_pems
+  register: _jenkins_docker_cloud_pems
 
 - name: Index the slurped PEMs by filename
   ansible.builtin.set_fact:
-    _cloud_pem: "{{ dict(_cloud_pems.results | map(attribute='item') | zip(_cloud_pems.results | map(attribute='content') | map('b64decode'))) }}"
+    _jenkins_docker_cloud_pem: >-
+      {{ dict(_jenkins_docker_cloud_pems.results | map(attribute='item') |
+         zip(_jenkins_docker_cloud_pems.results | map(attribute='content') | map('b64decode'))) }}
 
 - name: Template the Docker Cloud JCasC fragment
   ansible.builtin.template:
     src: docker-cloud.yaml.j2
-    dest: "{{ jenkins_cloud_casc_dir }}/020-docker-cloud.yaml"
+    dest: "{{ jenkins_docker_cloud_casc_dir }}/020-docker-cloud.yaml"
     owner: jenkins
     group: jenkins
     mode: "0640"
   vars:
-    _ca_pem: "{{ _cloud_pem['ca.pem'] }}"
-    _client_cert_pem: "{{ _cloud_pem['client-cert.pem'] }}"
-    _client_key_pem: "{{ _cloud_pem['client-key.pem'] }}"
+    _ca_pem: "{{ _jenkins_docker_cloud_pem['ca.pem'] }}"
+    _client_cert_pem: "{{ _jenkins_docker_cloud_pem['client-cert.pem'] }}"
+    _client_key_pem: "{{ _jenkins_docker_cloud_pem['client-key.pem'] }}"
 
 - name: Reload JCasC configuration live (no controller restart needed)
   community.general.jenkins_script:
     script: "io.jenkins.plugins.casc.ConfigurationAsCode.get().configure()"
-    user: "{{ jenkins_admin_user | default(omit) }}"
-    password: "{{ jenkins_admin_password | default(omit) }}"
+    user: "{{ jenkins_controller_admin_user | default(omit) }}"
+    password: "{{ jenkins_controller_admin_password | default(omit) }}"

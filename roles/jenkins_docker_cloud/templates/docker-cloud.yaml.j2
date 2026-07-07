@@ -4,7 +4,7 @@ credentials:
       - credentials:
           - x509ClientCert:
               scope: GLOBAL
-              id: "{{ jenkins_cloud_credentials_id }}"
+              id: "{{ jenkins_docker_cloud_credentials_id }}"
               description: "Docker host mTLS client credential (from Vault)"
               clientKeySecret: |
                 {{ _client_key_pem | indent(16) }}
@@ -16,18 +16,18 @@ credentials:
 jenkins:
   clouds:
     - docker:
-        name: "{{ jenkins_cloud_name }}"
+        name: "{{ jenkins_docker_cloud_name }}"
         dockerApi:
           dockerHost:
-            uri: "{{ jenkins_cloud_docker_host_uri }}"
-            credentialsId: "{{ jenkins_cloud_credentials_id }}"
+            uri: "{{ jenkins_docker_cloud_docker_host_uri }}"
+            credentialsId: "{{ jenkins_docker_cloud_credentials_id }}"
         templates:
-          - labelString: "{{ jenkins_cloud_agent_labels }}"
+          - labelString: "{{ jenkins_docker_cloud_agent_labels }}"
             connector: "attach"
             remoteFs: /home/jenkins/agent
-            instanceCapStr: "{{ jenkins_cloud_agent_instance_cap }}"
+            instanceCapStr: "{{ jenkins_docker_cloud_agent_instance_cap }}"
             dockerTemplateBase:
-              image: "{{ jenkins_cloud_agent_image }}"
-{% if jenkins_cloud_agent_network is defined %}
-              network: "{{ jenkins_cloud_agent_network }}"
+              image: "{{ jenkins_docker_cloud_agent_image }}"
+{% if jenkins_docker_cloud_agent_network is defined %}
+              network: "{{ jenkins_docker_cloud_agent_network }}"
 {% endif %}

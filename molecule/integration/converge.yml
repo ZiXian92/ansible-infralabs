@@ -9,11 +9,11 @@
   become: false # molecule podman containers connect as root already
   vars:
     _approle: "{{ lookup('file', playbook_dir + '/.ephemeral-approle.json') | from_json }}"
-    vault_addr: "{{ lookup('env', 'VAULT_ADDR') | default('http://vault:8200', true) }}"
-    vault_role_id: "{{ _approle.vault_role_id }}"
-    vault_secret_id: "{{ _approle.vault_secret_id }}"
-    vault_kv_mount: "{{ _approle.vault_kv_mount }}"
-    vault_cert_base: "{{ lookup('env', 'VAULT_CERT_BASE') | default('jenkins/docker-mtls', true) }}"
+    vault_certs_addr: "{{ lookup('env', 'VAULT_ADDR') | default('http://vault:8200', true) }}"
+    vault_certs_role_id: "{{ _approle.vault_role_id }}"
+    vault_certs_secret_id: "{{ _approle.vault_secret_id }}"
+    vault_certs_kv_mount: "{{ _approle.vault_kv_mount }}"
+    vault_certs_cert_base: "{{ lookup('env', 'VAULT_CERT_BASE') | default('jenkins/docker-mtls', true) }}"
     # Matches inventory/group_vars/docker_hosts.yml: the docker-host needs the CA
     # (to verify clients) and the server cert/key, not the client cert.
     vault_certs_install_server: true
@@ -21,9 +21,9 @@
     # Duplicated from the jenkins_controllers play below rather than shared via
     # group_vars (prepare.yml's comment already notes Molecule doesn't load
     # group_vars/all.yml for this synthetic inventory) -- must stay identical to
-    # jenkins_cloud_agent_image there, since this is the same image the Docker
+    # jenkins_docker_cloud_agent_image there, since this is the same image the Docker
     # Cloud will ask the docker-host to run.
-    jenkins_cloud_agent_image: docker.io/jenkins/inbound-agent:latest
+    jenkins_docker_cloud_agent_image: docker.io/jenkins/inbound-agent:latest
   roles:
     - docker_host
   tasks:
@@ -39,14 +39,14 @@
     # once the image is already cached.
     - name: Check whether the Jenkins agent image is already cached
       ansible.builtin.command:
-        cmd: "podman image exists {{ jenkins_cloud_agent_image }}"
+        cmd: "podman image exists {{ jenkins_docker_cloud_agent_image }}"
       register: _agent_image_check
       failed_when: false
       changed_when: false
 
     - name: Pull the Jenkins agent image if it isn't already cached
       ansible.builtin.command:
-        cmd: "podman pull {{ jenkins_cloud_agent_image }}"
+        cmd: "podman pull {{ jenkins_docker_cloud_agent_image }}"
       when: _agent_image_check.rc != 0
       register: _agent_image_pull
       until: _agent_image_pull.rc == 0
@@ -59,11 +59,11 @@
   become: false
   vars:
     _approle: "{{ lookup('file', playbook_dir + '/.ephemeral-approle.json') | from_json }}"
-    vault_addr: "{{ lookup('env', 'VAULT_ADDR') | default('http://vault:8200', true) }}"
-    vault_role_id: "{{ _approle.vault_role_id }}"
-    vault_secret_id: "{{ _approle.vault_secret_id }}"
-    vault_kv_mount: "{{ _approle.vault_kv_mount }}"
-    vault_cert_base: "{{ lookup('env', 'VAULT_CERT_BASE') | default('jenkins/docker-mtls', true) }}"
+    vault_certs_addr: "{{ lookup('env', 'VAULT_ADDR') | default('http://vault:8200', true) }}"
+    vault_certs_role_id: "{{ _approle.vault_role_id }}"
+    vault_certs_secret_id: "{{ _approle.vault_secret_id }}"
+    vault_certs_kv_mount: "{{ _approle.vault_kv_mount }}"
+    vault_certs_cert_base: "{{ lookup('env', 'VAULT_CERT_BASE') | default('jenkins/docker-mtls', true) }}"
     # Matches inventory/group_vars/jenkins_controllers.yml: the controller needs
     # the CA and the client cert/key to authenticate to the Docker host's mTLS API.
     vault_certs_install_client: true
@@ -75,21 +75,21 @@
     vault_certs_dir: /var/jenkins_home/pki-mtls
     vault_certs_owner: jenkins
     vault_certs_group: jenkins
-    jenkins_cloud_certs_dir: /var/jenkins_home/pki-mtls
+    jenkins_docker_cloud_certs_dir: /var/jenkins_home/pki-mtls
     # Matches the Containerfile's CASC_JENKINS_CONFIG (the from-scratch defaults
     # of both roles point at /var/lib/jenkins/casc_configs, jenkins_controller's
     # own real install path -- not this test image's).
-    jenkins_casc_dir: /var/jenkins_home/casc_configs
-    jenkins_cloud_casc_dir: /var/jenkins_home/casc_configs
-    jenkins_manage_packages: false # base image already ships Jenkins + plugins + base JCasC
+    jenkins_controller_casc_dir: /var/jenkins_home/casc_configs
+    jenkins_docker_cloud_casc_dir: /var/jenkins_home/casc_configs
+    jenkins_controller_manage_packages: false # base image already ships Jenkins + plugins + base JCasC
     # Docker Cloud endpoint + agent image: no longer a role default (see
     # roles/jenkins_docker_cloud/defaults/main.yml) -- mirrors
     # inventory/group_vars/jenkins_controllers.yml's derivation, using this
     # scenario's own synthetic inventory (Molecule doesn't load group_vars/all.yml,
     # so docker_host_tls_port is set here rather than looked up from there).
     docker_host_tls_port: 2376
-    jenkins_cloud_docker_host_uri: "tcp://{{ groups['docker_hosts'][0] }}:{{ docker_host_tls_port }}"
-    jenkins_cloud_agent_image: docker.io/jenkins/inbound-agent:latest
+    jenkins_docker_cloud_docker_host_uri: "tcp://{{ groups['docker_hosts'][0] }}:{{ docker_host_tls_port }}"
+    jenkins_docker_cloud_agent_image: docker.io/jenkins/inbound-agent:latest
     # docker-host's own Podman engine is itself nested inside a Molecule-podman
     # container; its host kernel doesn't expose the nftables/NAT support
     # netavark needs to set up a normal bridge network, so agent containers
@@ -100,7 +100,7 @@
     # a network of its own -- Jenkins drives it entirely via `docker exec`
     # over the already-established mTLS Docker-API connection -- so "none" is
     # both sufficient and sidesteps this nested-networking limitation.
-    jenkins_cloud_agent_network: none
+    jenkins_docker_cloud_agent_network: none
   roles:
     - jenkins_controller
     - jenkins_docker_cloud

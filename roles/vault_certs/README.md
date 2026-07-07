@@ -9,10 +9,10 @@ node** (the executor has `hvac`), so managed hosts need neither Vault access nor
 
 | Var | Default | Purpose |
 |-----|---------|---------|
-| `vault_addr` | `http://vault:8200` | Vault API (from env via group_vars) |
-| `vault_role_id` / `vault_secret_id` | `""` | AppRole creds (from env) |
-| `vault_kv_mount` | `secret` | KV v2 mount |
-| `vault_cert_base` | `jenkins/docker-mtls` | Base KV path |
+| `vault_certs_addr` | `http://vault:8200` | Vault API (from env via group_vars) |
+| `vault_certs_role_id` / `vault_certs_secret_id` | `""` | AppRole creds (from env) |
+| `vault_certs_kv_mount` | `secret` | KV v2 mount |
+| `vault_certs_cert_base` | `jenkins/docker-mtls` | Base KV path |
 | `vault_certs_install_ca/server/client` | `true`/`false`/`false` | Which PEMs to write |
 | `vault_certs_dir` | `/etc/pki/mtls` | Output directory |
 

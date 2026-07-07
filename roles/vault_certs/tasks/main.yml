@@ -6,32 +6,33 @@
 - name: Assert AppRole credentials are present
   ansible.builtin.assert:
     that:
-      - vault_role_id | length > 0
-      - vault_secret_id | length > 0
+      - vault_certs_role_id | length > 0
+      - vault_certs_secret_id | length > 0
     fail_msg: >-
-      vault_role_id / vault_secret_id are empty. Run `../vault-infra/tasks.ps1 up`
-      and make sure tasks.ps1 exported VAULT_ROLE_ID / VAULT_SECRET_ID.
+      vault_certs_role_id / vault_certs_secret_id are empty. Run
+      `../vault-infra/tasks.ps1 up` and make sure tasks.ps1 exported
+      VAULT_ROLE_ID / VAULT_SECRET_ID.
 
 - name: Fetch mTLS secrets from Vault (on the control node)
   delegate_to: localhost
   vars:
     _paths:
-      ca: "{{ vault_cert_base }}/ca"
-      server: "{{ vault_cert_base }}/server"
-      client: "{{ vault_cert_base }}/client"
+      ca: "{{ vault_certs_cert_base }}/ca"
+      server: "{{ vault_certs_cert_base }}/server"
+      client: "{{ vault_certs_cert_base }}/client"
   community.hashi_vault.vault_kv2_get:
-    url: "{{ vault_addr }}"
+    url: "{{ vault_certs_addr }}"
     auth_method: approle
-    role_id: "{{ vault_role_id }}"
-    secret_id: "{{ vault_secret_id }}"
-    engine_mount_point: "{{ vault_kv_mount }}"
+    role_id: "{{ vault_certs_role_id }}"
+    secret_id: "{{ vault_certs_secret_id }}"
+    engine_mount_point: "{{ vault_certs_kv_mount }}"
     path: "{{ _paths[item] }}"
-  register: _vault_certs
+  register: _vault_certs_secrets
   loop: "{{ ['ca'] + (['server'] if vault_certs_install_server else []) + (['client'] if vault_certs_install_client else []) }}"
 
 - name: Index fetched secrets by name
   ansible.builtin.set_fact:
-    _certs: "{{ dict(_vault_certs.results | map(attribute='item') | zip(_vault_certs.results | map(attribute='secret'))) }}"
+    _vault_certs_by_name: "{{ dict(_vault_certs_secrets.results | map(attribute='item') | zip(_vault_certs_secrets.results | map(attribute='secret'))) }}"
 
 - name: Ensure certificate directory exists
   ansible.builtin.file:
@@ -43,7 +44,7 @@
 
 - name: Install CA certificate
   ansible.builtin.copy:
-    content: "{{ _certs.ca['ca.pem'] }}"
+    content: "{{ _vault_certs_by_name.ca['ca.pem'] }}"
     dest: "{{ vault_certs_dir }}/ca.pem"
     owner: "{{ vault_certs_owner }}"
     group: "{{ vault_certs_group }}"
@@ -52,7 +53,7 @@
 
 - name: Install server certificate and key
   ansible.builtin.copy:
-    content: "{{ _certs.server[item.key] }}"
+    content: "{{ _vault_certs_by_name.server[item.key] }}"
     dest: "{{ vault_certs_dir }}/{{ item.dest }}"
     owner: "{{ vault_certs_owner }}"
     group: "{{ vault_certs_group }}"
@@ -70,7 +71,7 @@
 
 - name: Install client certificate and key
   ansible.builtin.copy:
-    content: "{{ _certs.client[item.key] }}"
+    content: "{{ _vault_certs_by_name.client[item.key] }}"
     dest: "{{ vault_certs_dir }}/{{ item.dest }}"
     owner: "{{ vault_certs_owner }}"
     group: "{{ vault_certs_group }}"

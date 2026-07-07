@@ -1,7 +1,7 @@
 ---
 # Install and configure the Jenkins controller.
 #
-# `jenkins_manage_packages` (default true) drives the from-scratch install path used
+# `jenkins_controller_manage_packages` (default true) drives the from-scratch install path used
 # by site.yml against real RHEL/Fedora-family hosts: install Java + Jenkins LTS from
 # its official RPM repo, disable the setup wizard, and apply a base JCasC config.
 # molecule/integration sets it to false because its jenkins-controller platform is
@@ -18,13 +18,13 @@
     # Jenkins LTS baseline requires Java 21 minimum (Java 17 support was dropped).
     name: java-21-openjdk-headless
     state: present
-  when: jenkins_manage_packages | bool
+  when: jenkins_controller_manage_packages | bool
 
 - name: Add the Jenkins LTS RPM signing key
   ansible.builtin.rpm_key:
     key: https://pkg.jenkins.io/redhat-stable/jenkins.io-2023.key
     state: present
-  when: jenkins_manage_packages | bool
+  when: jenkins_controller_manage_packages | bool
 
 - name: Add the Jenkins LTS RPM repo
   ansible.builtin.yum_repository:
@@ -33,37 +33,37 @@
     baseurl: https://pkg.jenkins.io/redhat-stable
     gpgcheck: true
     gpgkey: https://pkg.jenkins.io/redhat-stable/jenkins.io-2023.key
-  when: jenkins_manage_packages | bool
+  when: jenkins_controller_manage_packages | bool
 
 - name: Install Jenkins
   ansible.builtin.package:
     name: jenkins
     state: present
-  when: jenkins_manage_packages | bool
+  when: jenkins_controller_manage_packages | bool
 
 - name: Ensure Jenkins is stopped before first-boot reconfiguration
   ansible.builtin.systemd:
     name: jenkins
     state: stopped
-  when: jenkins_manage_packages | bool
+  when: jenkins_controller_manage_packages | bool
 
 - name: Ensure the JCasC config directory exists
   ansible.builtin.file:
-    path: "{{ jenkins_casc_dir }}"
+    path: "{{ jenkins_controller_casc_dir }}"
     state: directory
     owner: jenkins
     group: jenkins
     mode: "0750"
-  when: jenkins_manage_packages | bool
+  when: jenkins_controller_manage_packages | bool
 
 - name: Template the base JCasC config (security realm + system message)
   ansible.builtin.template:
     src: base.yaml.j2
-    dest: "{{ jenkins_casc_dir }}/010-base.yaml"
+    dest: "{{ jenkins_controller_casc_dir }}/010-base.yaml"
     owner: jenkins
     group: jenkins
     mode: "0640"
-  when: jenkins_manage_packages | bool
+  when: jenkins_controller_manage_packages | bool
 
 - name: Disable the setup wizard and point Jenkins at the JCasC config directory
   ansible.builtin.lineinfile:
@@ -71,8 +71,8 @@
     regexp: '^JENKINS_JAVA_OPTIONS='
     line: >-
       JENKINS_JAVA_OPTIONS="-Djenkins.install.runSetupWizard=false
-      -Dcasc.jenkins.config={{ jenkins_casc_dir }}"
-  when: jenkins_manage_packages | bool
+      -Dcasc.jenkins.config={{ jenkins_controller_casc_dir }}"
+  when: jenkins_controller_manage_packages | bool
 
 - name: Start Jenkins
   ansible.builtin.systemd:
@@ -80,24 +80,24 @@
     enabled: true
     state: started
     daemon_reload: true
-  when: jenkins_manage_packages | bool
+  when: jenkins_controller_manage_packages | bool
 
 - name: Wait for Jenkins to accept connections
   ansible.builtin.uri:
-    url: "http://localhost:{{ jenkins_http_port }}/login"
+    url: "http://localhost:{{ jenkins_controller_http_port }}/login"
     status_code: 200
-  register: _jenkins_up
-  until: _jenkins_up.status == 200
+  register: _jenkins_controller_up
+  until: _jenkins_controller_up.status == 200
   retries: 30
   delay: 5
-  when: jenkins_manage_packages | bool
+  when: jenkins_controller_manage_packages | bool
 
 - name: Install required Jenkins plugins
   community.general.jenkins_plugin:
     name: "{{ item }}"
     state: present
-    url_username: "{{ jenkins_admin_user }}"
-    url_password: "{{ jenkins_admin_password }}"
-  loop: "{{ jenkins_plugins }}"
-  when: jenkins_manage_packages | bool
+    url_username: "{{ jenkins_controller_admin_user }}"
+    url_password: "{{ jenkins_controller_admin_password }}"
+  loop: "{{ jenkins_controller_plugins }}"
+  when: jenkins_controller_manage_packages | bool
   notify: restart jenkins
