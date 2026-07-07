@@ -18,7 +18,22 @@ containing an `x509ClientCert` credential (docker-commons'
 `jenkins.clouds.docker` block, then reloads JCasC live via
 `community.general.jenkins_script` — no controller restart needed.
 
-`molecule/integration`'s `verify.yml` asserts the cloud is registered and that an
-actual mTLS handshake to the Docker host succeeds. It deliberately does **not** have
-Jenkins launch a real build agent through the cloud (that would add a fourth
-container-nesting level) — that path is exercised manually against the real lab.
+`molecule/integration`'s `verify.yml` asserts the cloud is registered, that an
+actual mTLS handshake to the Docker host succeeds, and that Jenkins can actually
+launch a build agent through the cloud: it runs a real Pipeline job with
+`agent { label 'docker' }`, waits for the Docker Cloud to provision the agent
+container, and asserts the build succeeds with the expected output. `converge.yml`
+pre-pulls the agent image (`jenkins_cloud_agent_image`) onto the docker-host itself
+first, so the job's own wait window isn't spent on a live Docker Hub pull from a
+nested host with less reliable network/DNS egress.
+
+`jenkins_cloud_agent_network` (also no role default) sets `dockerTemplateBase`'s
+`network:`. `molecule/integration` sets it to `none`: its docker-host is itself a
+Podman container, and agent containers launched on the default bridge network fail
+outright there (`netavark: nftables error: "nft" did not return successfully while
+applying ruleset` -- the nested host's kernel doesn't expose the NAT/nftables
+support netavark needs). The `attach` connector never needs the agent container to
+reach out over a network of its own -- Jenkins drives it entirely via `docker exec`
+over the already-established mTLS Docker-API connection -- so `none` is both
+sufficient and side-steps the nested-networking limitation. A real docker-host
+running on an actual machine shouldn't need this override.
