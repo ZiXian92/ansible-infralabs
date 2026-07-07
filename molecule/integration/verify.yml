@@ -36,7 +36,127 @@
           - _ping.status == 200
         fail_msg: "mTLS handshake/ping to {{ docker_host_uri }} did not return 200"
 
-# Deliberately not exercised here: having Jenkins actually launch a build agent
-# container through the Docker Cloud. docker-host is already a Level-1 privileged
-# container running its own podman engine; a real agent launch would add a fourth
-# nesting level. That path is exercised manually against the real lab environment.
+- name: Confirm the Jenkins agent image is already cached on the docker-host
+  hosts: docker_hosts
+  become: false
+  vars:
+    # Must match converge.yml's jenkins_cloud_agent_image -- this checks that its
+    # pre-pull task actually landed the image in this host's local Podman storage,
+    # the same storage the mTLS Docker-API (podman system service) serves from. If
+    # this ever fails, the Docker Cloud would fall back to pulling from Docker Hub
+    # live during the job below instead of using a local image, which is slower and
+    # depends on this nested host's own network/DNS egress.
+    jenkins_cloud_agent_image: docker.io/jenkins/inbound-agent:latest
+  tasks:
+    - name: Assert the agent image exists locally (not just resolvable from Docker Hub)
+      ansible.builtin.command:
+        cmd: "podman image exists {{ jenkins_cloud_agent_image }}"
+      changed_when: false
+
+- name: Run a real Pipeline job on the Docker Cloud agent and confirm it succeeds
+  hosts: jenkins_controllers
+  become: false
+  vars:
+    jenkins_hello_job_name: hello-docker-agent
+    jenkins_hello_message: "Hello from the docker-host Jenkins agent"
+    # Matches one of the labels on jenkins_docker_cloud's template
+    # (jenkins_cloud_agent_labels default: "docker linux"). The controller's own
+    # built-in node carries none of these labels, so satisfying this constraint is
+    # only possible by Jenkins actually provisioning an agent through the Docker
+    # Cloud -- there is no other node it could silently fall back to.
+    jenkins_hello_agent_label: docker
+  tasks:
+    - name: Create (or update) the Hello pipeline job and trigger a build
+      community.general.jenkins_script:
+        script: |
+          def jenkins = jenkins.model.Jenkins.get()
+          def job = jenkins.getItem('{{ jenkins_hello_job_name }}')
+          if (job == null) {
+            job = jenkins.createProject(org.jenkinsci.plugins.workflow.job.WorkflowJob.class, '{{ jenkins_hello_job_name }}')
+          }
+          // Triple-SINGLE-quoted: this must NOT be a GString. It's Pipeline source
+          // text, evaluated by the CPS engine later, inside its own `env` binding --
+          // not by this admin script's own Groovy engine right now (which has no
+          // `env` at all, and would throw MissingPropertyException immediately).
+          def pipelineScript = '''
+          pipeline {
+            agent { label '{{ jenkins_hello_agent_label }}' }
+            stages {
+              stage('Hello') {
+                steps {
+                  echo '{{ jenkins_hello_message }}'
+                  echo "NODE_NAME=${env.NODE_NAME}"
+                }
+              }
+            }
+          }
+          '''
+          job.setDefinition(new org.jenkinsci.plugins.workflow.cps.CpsFlowDefinition(pipelineScript, true))
+          job.save()
+          job.scheduleBuild2(0)
+          println("triggered")
+        user: admin
+        password: admin
+      register: _create_job
+      # community.general.jenkins_script only fails on HTTP-level errors or a
+      # stack trace matching the literal substring "at java.lang.Thread" -- JDK
+      # 9+'s module-qualified traces ("at java.base/java.lang.Thread.run") never
+      # match that, so a thrown Groovy exception here would otherwise be reported
+      # as an innocuous "ok" while silently never creating/scheduling the job.
+      # Checking for our own explicit completion marker sidesteps that entirely.
+      failed_when: "'triggered' not in _create_job.output"
+
+    - name: Wait for the Hello pipeline build to finish (covers agent provisioning time)
+      community.general.jenkins_script:
+        script: |
+          def job = jenkins.model.Jenkins.get().getItem('{{ jenkins_hello_job_name }}')
+          def build = job?.getLastBuild()
+          if (build == null || build.isBuilding()) {
+            println('PENDING')
+          } else if (build.result == hudson.model.Result.SUCCESS) {
+            println('DONE ' + build.number + ' ' + build.result)
+          } else if (job.builds.size() < 3) {
+            // The very first agent ever provisioned against a freshly created
+            // Jenkins home can lose a race persisting the new Node's
+            // config.xml (its nodes/<name>/ directory isn't created yet when
+            // the atomic rename runs) -- a one-time cold-start issue, not a
+            // real Docker Cloud problem. Retry a couple of times before
+            // treating a failure as final.
+            job.scheduleBuild2(0)
+            println('PENDING (retrying after ' + build.result + ')')
+          } else {
+            println('DONE ' + build.number + ' ' + build.result)
+          }
+        user: admin
+        password: admin
+      register: _hello_build
+      # Also break out of the retry loop on a Groovy exception (see the note on the
+      # task above) instead of burning the full retry budget on a broken check.
+      until: "'DONE' in _hello_build.output or 'Exception' in _hello_build.output"
+      # Generous window: covers Docker Cloud provisioning a fresh agent container
+      # and attaching to it, not just the trivial pipeline body itself.
+      retries: 30
+      delay: 10
+
+    - name: Assert the wait loop actually observed a finished build (not a broken check script)
+      ansible.builtin.assert:
+        that:
+          - "'DONE' in _hello_build.output"
+        fail_msg: "Hello pipeline build never finished: {{ _hello_build.output }}"
+
+    - name: Assert the build succeeded on a real agent (not the controller) and printed the greeting
+      community.general.jenkins_script:
+        script: |
+          def job = jenkins.model.Jenkins.get().getItem('{{ jenkins_hello_job_name }}')
+          def build = job.getLastBuild()
+          assert build.result == hudson.model.Result.SUCCESS : "build #${build.number} result was ${build.result}"
+          def log = build.getLog(200).join("\n")
+          assert log.contains('{{ jenkins_hello_message }}') : "expected greeting missing from build log"
+          assert !log.contains("NODE_NAME=built-in") : "build ran on the controller instead of a Docker Cloud agent"
+          println("OK build #" + build.number + "\n" + log)
+        user: admin
+        password: admin
+      register: _final_check
+      # Same reasoning as the create-job task: don't trust the module's own
+      # (JDK21-broken) exception detection for these `assert` failures either.
+      failed_when: "'OK build' not in _final_check.output"
