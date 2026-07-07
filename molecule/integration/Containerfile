@@ -13,7 +13,9 @@ FROM jenkins/jenkins:lts-jdk21
 USER root
 # Ansible needs a Python interpreter on every managed node (this image ships none).
 RUN apt-get update && apt-get install -y --no-install-recommends python3 && rm -rf /var/lib/apt/lists/*
-RUN jenkins-plugin-cli --plugins docker-plugin docker-java-api configuration-as-code
+# workflow-aggregator (Pipeline) is needed by verify.yml, which defines and runs a
+# real Pipeline job against the Docker Cloud agent, not just registering the cloud.
+RUN jenkins-plugin-cli --plugins docker-plugin docker-java-api configuration-as-code workflow-aggregator
 
 RUN mkdir -p /var/jenkins_home/casc_configs \
     && chown jenkins:jenkins /var/jenkins_home/casc_configs
