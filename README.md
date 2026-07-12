@@ -26,17 +26,19 @@ roles/
   jenkins_controller/      installs/configures Jenkins + plugins + JCasC
   jenkins_docker_cloud/    registers the Docker Cloud (JCasC)
 molecule/integration/      hermetic full-stack test: its own disposable Vault,
-                           docker-host, and jenkins-controller, provisioned and
-                           destroyed every run
+                           docker-host, and jenkins-controller, provisioned
+                           natively in Ansible and destroyed every run
 tasks.ps1                  build image + run molecule/playbooks in the executor
 ```
 
 ## Prerequisites
 - Podman Desktop for Windows; `podman-machine-default` running.
 - `../vault-infra` is only needed for a **real** run against actual hosts
-  (`site.yml`), which reads its persistent Vault's AppRole creds the same way
-  `molecule/integration` reads its own ephemeral ones. The test suite in this repo
-  is fully self-contained and does not depend on `../vault-infra` being up.
+  (`site.yml`), which reads its persistent Vault's AppRole creds via the
+  environment (`VAULT_ROLE_ID`/`VAULT_SECRET_ID`/etc., see `inventory/group_vars/all.yml`).
+  The test suite in this repo is fully self-contained -- `molecule/integration`
+  provisions its own ephemeral Vault, certs, policy, and AppRole natively in
+  Ansible, with no dependency on `../vault-infra` or its Terraform config at all.
 
 ## Usage
 ```powershell
@@ -58,18 +60,14 @@ and jenkins-controller every run, on an isolated `iaclab-integration` network â€
 `tasks.ps1` is a thin wrapper around one `podman run` of the executor image plus a
 `molecule`/`ansible-lint` command inside it. The executor mounts the host's rootless
 podman socket (`CONTAINER_HOST`) so everything Molecule creates lands as a sibling
-container on the host, not nested, and also mounts `../vault-infra` (at a separate
-mount point, same host directory) so `molecule/integration`'s `prepare.yml`/
-`destroy.yml` can run Terraform against their own ephemeral Vault sidecar:
+container on the host, not nested:
 
 ```bash
-VAULT_INFRA_DIR="$(cd ../vault-infra && pwd)"
 RUN_ARGS=(
   -v /run/user/1000/podman/podman.sock:/run/podman/podman.sock:Z
   -e CONTAINER_HOST=unix:///run/podman/podman.sock
   --network iaclab-integration
   -v "$(pwd):/work" -w /work
-  -v "$VAULT_INFRA_DIR:/vault-infra" -e HOST_VAULT_INFRA_DIR="$VAULT_INFRA_DIR"
   localhost/infra-lab/ansible-executor:latest
 )
 ```

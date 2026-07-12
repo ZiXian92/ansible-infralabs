@@ -8,7 +8,9 @@
 # node, so the playbook and its tests always run from here (locally and, later, in CI).
 FROM quay.io/podman/stable
 
-# hvac (for community.hashi_vault) + openssl for local cert inspection.
+# hvac (for community.hashi_vault) + openssl for local cert inspection. The
+# cryptography package (requirements.txt) backs community.crypto's from-scratch
+# CA/cert generation used by molecule/integration's prepare.yml.
 RUN dnf -y install python3-pip openssl && dnf clean all
 
 COPY requirements.txt /tmp/requirements.txt

@@ -1,17 +1,14 @@
 ---
 # Stand up the fixtures Molecule doesn't manage as platforms: the scenario network,
-# an ephemeral dev-mode Vault sidecar, and the vault-infra Terraform config applied
-# against that sidecar under a dedicated workspace (never the persistent
-# deployment's default workspace/state).
+# an ephemeral dev-mode Vault sidecar, and everything that sidecar needs -- KV v2
+# mount, a from-scratch CA + server/client leaf certs deposited into it, an
+# `ansible-executor` policy, and an AppRole bound to that policy -- provisioned
+# natively with Ansible (community.crypto for the certs, raw Vault HTTP API calls
+# for the rest) rather than via vault-infra's Terraform config. This scenario no
+# longer touches vault-infra at all: it's fully self-contained.
 #
 # Runs inside the executor container, which tasks.ps1's `test-integration` action
-# attaches to the `iaclab-integration` network and mounts vault-infra at
-# /vault-infra (host-writable staging area for the scratch files below) alongside
-# passing HOST_VAULT_INFRA_DIR — the same directory's *host*-absolute path — so the
-# sibling terraform container this play spins up can bind-mount it directly (podman
-# resolves bind-mount sources against the host/podman-machine, not this container's
-# own filesystem, now that the executor talks to the host engine over a mounted
-# socket instead of nesting its own).
+# attaches to the `iaclab-integration` network.
 - name: Prepare hermetic fixtures
   hosts: localhost
   connection: local
@@ -21,22 +18,27 @@
     vault_sidecar_name: molecule-integration-vault
     vault_image: docker.io/hashicorp/vault:2.0.3
     vault_dev_root_token: molecule-integration-root-token
+    vault_addr: http://vault:8200
     kv_mount: secret_integration
-    tf_workspace: molecule-integration
-    tf_image: docker.io/hashicorp/terraform:1.15
-    host_vault_infra_dir: "{{ lookup('env', 'HOST_VAULT_INFRA_DIR') }}"
-    local_vault_infra_mount: /vault-infra
+    cert_base: jenkins/docker-mtls
+    pki_dir: /tmp/molecule-integration-pki
     scratch_approle_file: "{{ playbook_dir }}/.ephemeral-approle.json"
 
-  tasks:
-    - name: Assert HOST_VAULT_INFRA_DIR was passed in
-      ansible.builtin.assert:
-        that: host_vault_infra_dir | length > 0
-        fail_msg: >-
-          HOST_VAULT_INFRA_DIR is empty. This must be set by
-          ../../tasks.ps1 test-integration to the host-absolute path of
-          ../../../vault-infra.
+    # Mirrors vault-infra/config/variables.tf's defaults -- kept identical so the
+    # certs and policy this scenario provisions are equivalent in shape to what a
+    # real `vault-infra/tasks.ps1 up` produces.
+    ca_common_name: Infra Automation Lab Security CA
+    ca_validity_days: 3650 # 87600h
+    docker_host_dns_sans:
+      - docker-host
+      - localhost
+    docker_host_ip_sans:
+      - 127.0.0.1
+    client_common_name: jenkins-controller
+    leaf_validity_days: 365 # 8760h
+    approle_role_name: ansible-executor
 
+  tasks:
     - name: Ensure the scenario network exists
       ansible.builtin.command:
         cmd: "podman network create {{ integration_network }}"
@@ -69,68 +71,238 @@
 
     - name: Wait for the ephemeral Vault to answer health checks
       ansible.builtin.uri:
-        url: "http://vault:8200/v1/sys/health"
+        url: "{{ vault_addr }}/v1/sys/health"
         status_code: [200]
       register: _vault_health
       until: _vault_health.status == 200
       retries: 30
       delay: 2
 
-    - name: Write the scratch Vault init-file (feeds versions.tf's vault_init_file var)
-      ansible.builtin.copy:
-        dest: "{{ local_vault_infra_mount }}/.ephemeral-vault-init.json"
-        content: "{{ {'root_token': vault_dev_root_token} | to_nice_json }}"
-        mode: "0600"
+    - name: Enable the KV v2 secrets engine
+      ansible.builtin.uri:
+        url: "{{ vault_addr }}/v1/sys/mounts/{{ kv_mount }}"
+        method: POST
+        headers:
+          X-Vault-Token: "{{ vault_dev_root_token }}"
+        body_format: json
+        body:
+          type: kv-v2
+        status_code: [200, 204, 400]
+      register: _kv_mount
+      failed_when: >-
+        _kv_mount.status not in [200, 204] and
+        'already in use' not in (_kv_mount.json.errors | default([]) | join(' '))
+      changed_when: _kv_mount.status in [200, 204]
 
-    - name: Terraform init (ephemeral workspace)
-      ansible.builtin.command:
-        cmd: >
-          podman run --rm --network {{ integration_network }}
-          -v {{ host_vault_infra_dir }}:/work -w /work/config
-          {{ tf_image }} init -input=false
-      changed_when: true
+    - name: Ensure the scratch PKI directory exists
+      ansible.builtin.file:
+        path: "{{ pki_dir }}"
+        state: directory
+        mode: "0700"
 
-    - name: Select or create the ephemeral Terraform workspace
-      ansible.builtin.command:
-        cmd: >
-          podman run --rm --network {{ integration_network }}
-          -v {{ host_vault_infra_dir }}:/work -w /work/config
-          {{ tf_image }} workspace new {{ tf_workspace }}
-      register: _ws_new
-      failed_when:
-        - _ws_new.rc != 0
-        - "'already exists' not in _ws_new.stderr"
-      changed_when: _ws_new.rc == 0
+    - name: Generate the CA private key
+      community.crypto.openssl_privatekey:
+        path: "{{ pki_dir }}/ca-key.pem"
+        type: ECC
+        curve: secp256r1
 
-    - name: Terraform apply against the ephemeral Vault sidecar
-      ansible.builtin.command:
-        cmd: >
-          podman run --rm --network {{ integration_network }}
-          -v {{ host_vault_infra_dir }}:/work -w /work/config
-          -e TF_WORKSPACE={{ tf_workspace }}
-          {{ tf_image }} apply -input=false -auto-approve
-          -var vault_addr=http://vault:8200
-          -var kv_mount={{ kv_mount }}
-          -var vault_init_file=/work/.ephemeral-vault-init.json
-      changed_when: true
+    - name: Generate the CA CSR
+      community.crypto.openssl_csr:
+        path: "{{ pki_dir }}/ca.csr"
+        privatekey_path: "{{ pki_dir }}/ca-key.pem"
+        common_name: "{{ ca_common_name }}"
+        organization_name: Infra Automation Lab
+        basic_constraints:
+          - "CA:TRUE"
+        basic_constraints_critical: true
+        key_usage:
+          - keyCertSign
+          - cRLSign
+        key_usage_critical: true
 
-    - name: Read the ephemeral AppRole creds via terraform output
-      ansible.builtin.command:
-        cmd: >
-          podman run --rm --network {{ integration_network }}
-          -v {{ host_vault_infra_dir }}:/work -w /work/config
-          -e TF_WORKSPACE={{ tf_workspace }}
-          {{ tf_image }} output -json
-      register: _tf_output
-      changed_when: false
+    - name: Self-sign the CA certificate
+      community.crypto.x509_certificate:
+        path: "{{ pki_dir }}/ca-cert.pem"
+        csr_path: "{{ pki_dir }}/ca.csr"
+        privatekey_path: "{{ pki_dir }}/ca-key.pem"
+        provider: selfsigned
+        selfsigned_not_after: "+{{ ca_validity_days }}d"
+
+    - name: Generate the docker-host server private key
+      community.crypto.openssl_privatekey:
+        path: "{{ pki_dir }}/server-key.pem"
+        type: ECC
+        curve: secp256r1
+
+    - name: Generate the docker-host server CSR
+      vars:
+        _server_sans: >-
+          {{ (docker_host_dns_sans | map('regex_replace', '^', 'DNS:') | list) +
+             (docker_host_ip_sans | map('regex_replace', '^', 'IP:') | list) }}
+      community.crypto.openssl_csr:
+        path: "{{ pki_dir }}/server.csr"
+        privatekey_path: "{{ pki_dir }}/server-key.pem"
+        common_name: "{{ docker_host_dns_sans[0] }}"
+        subject_alt_name: "{{ _server_sans }}"
+        key_usage:
+          - digitalSignature
+          - keyEncipherment
+        key_usage_critical: true
+        extended_key_usage:
+          - serverAuth
+
+    - name: Sign the docker-host server certificate with the CA
+      community.crypto.x509_certificate:
+        path: "{{ pki_dir }}/server-cert.pem"
+        csr_path: "{{ pki_dir }}/server.csr"
+        provider: ownca
+        ownca_path: "{{ pki_dir }}/ca-cert.pem"
+        ownca_privatekey_path: "{{ pki_dir }}/ca-key.pem"
+        ownca_not_after: "+{{ leaf_validity_days }}d"
+
+    - name: Generate the client private key
+      community.crypto.openssl_privatekey:
+        path: "{{ pki_dir }}/client-key.pem"
+        type: ECC
+        curve: secp256r1
+
+    - name: Generate the client CSR
+      community.crypto.openssl_csr:
+        path: "{{ pki_dir }}/client.csr"
+        privatekey_path: "{{ pki_dir }}/client-key.pem"
+        common_name: "{{ client_common_name }}"
+        key_usage:
+          - digitalSignature
+          - keyEncipherment
+        key_usage_critical: true
+        extended_key_usage:
+          - clientAuth
+
+    - name: Sign the client certificate with the CA
+      community.crypto.x509_certificate:
+        path: "{{ pki_dir }}/client-cert.pem"
+        csr_path: "{{ pki_dir }}/client.csr"
+        provider: ownca
+        ownca_path: "{{ pki_dir }}/ca-cert.pem"
+        ownca_privatekey_path: "{{ pki_dir }}/ca-key.pem"
+        ownca_not_after: "+{{ leaf_validity_days }}d"
+
+    - name: Read the generated PEM material
+      no_log: true
+      ansible.builtin.set_fact:
+        _ca_cert: "{{ lookup('file', pki_dir + '/ca-cert.pem') }}"
+        _server_cert: "{{ lookup('file', pki_dir + '/server-cert.pem') }}"
+        _server_key: "{{ lookup('file', pki_dir + '/server-key.pem') }}"
+        _client_cert: "{{ lookup('file', pki_dir + '/client-cert.pem') }}"
+        _client_key: "{{ lookup('file', pki_dir + '/client-key.pem') }}"
+
+    - name: Store the CA and leaf certificates in Vault KV v2
+      no_log: true
+      ansible.builtin.uri:
+        url: "{{ vault_addr }}/v1/{{ kv_mount }}/data/{{ cert_base }}/{{ item.path }}"
+        method: POST
+        headers:
+          X-Vault-Token: "{{ vault_dev_root_token }}"
+        body_format: json
+        body:
+          data: "{{ item.data }}"
+        status_code: [200]
+      loop:
+        - path: ca
+          data:
+            ca.pem: "{{ _ca_cert }}"
+        - path: server
+          data:
+            cert.pem: "{{ _server_cert }}"
+            key.pem: "{{ _server_key }}"
+            ca.pem: "{{ _ca_cert }}"
+        - path: client
+          data:
+            cert.pem: "{{ _client_cert }}"
+            key.pem: "{{ _client_key }}"
+            ca.pem: "{{ _ca_cert }}"
+      loop_control:
+        label: "{{ item.path }}"
+
+    - name: Remove the scratch PKI directory (secrets now live only in Vault)
+      ansible.builtin.file:
+        path: "{{ pki_dir }}"
+        state: absent
+
+    - name: Create the ansible-executor Vault policy
+      vars:
+        _policy_hcl: |
+          path "{{ kv_mount }}/data/{{ cert_base }}/*" {
+            capabilities = ["read"]
+          }
+          path "{{ kv_mount }}/metadata/{{ cert_base }}/*" {
+            capabilities = ["read", "list"]
+          }
+      ansible.builtin.uri:
+        url: "{{ vault_addr }}/v1/sys/policies/acl/{{ approle_role_name }}"
+        method: PUT
+        headers:
+          X-Vault-Token: "{{ vault_dev_root_token }}"
+        body_format: json
+        body:
+          policy: "{{ _policy_hcl }}"
+        status_code: [200, 204]
+
+    - name: Enable the AppRole auth method
+      ansible.builtin.uri:
+        url: "{{ vault_addr }}/v1/sys/auth/approle"
+        method: POST
+        headers:
+          X-Vault-Token: "{{ vault_dev_root_token }}"
+        body_format: json
+        body:
+          type: approle
+        status_code: [200, 204, 400]
+      register: _approle_enable
+      failed_when: >-
+        _approle_enable.status not in [200, 204] and
+        'already in use' not in (_approle_enable.json.errors | default([]) | join(' '))
+      changed_when: _approle_enable.status in [200, 204]
+
+    - name: Create the ansible-executor AppRole role
+      ansible.builtin.uri:
+        url: "{{ vault_addr }}/v1/auth/approle/role/{{ approle_role_name }}"
+        method: POST
+        headers:
+          X-Vault-Token: "{{ vault_dev_root_token }}"
+        body_format: json
+        body:
+          token_policies: "{{ approle_role_name }}"
+          token_ttl: 1200
+          token_max_ttl: 3600
+          secret_id_ttl: 0
+        status_code: [200, 204]
+
+    - name: Read the AppRole role_id
+      ansible.builtin.uri:
+        url: "{{ vault_addr }}/v1/auth/approle/role/{{ approle_role_name }}/role-id"
+        method: GET
+        headers:
+          X-Vault-Token: "{{ vault_dev_root_token }}"
+        status_code: [200]
+      register: _role_id
+
+    - name: Generate an AppRole secret_id
+      no_log: true
+      ansible.builtin.uri:
+        url: "{{ vault_addr }}/v1/auth/approle/role/{{ approle_role_name }}/secret-id"
+        method: POST
+        headers:
+          X-Vault-Token: "{{ vault_dev_root_token }}"
+        status_code: [200]
+      register: _secret_id
 
     - name: Persist the AppRole creds for converge.yml (separate ansible-playbook run)
-      vars:
-        _tf_outputs: "{{ _tf_output.stdout | from_json }}"
+      no_log: true
       ansible.builtin.copy:
         dest: "{{ scratch_approle_file }}"
         content: >-
-          {{ {'vault_role_id': _tf_outputs.role_id.value,
-              'vault_secret_id': _tf_outputs.secret_id.value,
+          {{ {'vault_role_id': _role_id.json.data.role_id,
+              'vault_secret_id': _secret_id.json.data.secret_id,
               'vault_kv_mount': kv_mount} | to_nice_json }}
         mode: "0600"

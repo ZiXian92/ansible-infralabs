@@ -15,9 +15,10 @@
 
 .NOTES
   molecule/integration is a hermetic scenario: it provisions and destroys its own
-  Vault, docker-host, and jenkins-controller every run, on an isolated
-  `iaclab-integration` network -- kept separate from vault-infra's persistent-Vault
-  `iaclab` network, which this repo's tests no longer depend on.
+  Vault, docker-host, and jenkins-controller every run -- entirely natively in
+  Ansible (community.crypto for certs, raw Vault HTTP API calls for the rest) on
+  an isolated `iaclab-integration` network. It has no dependency on vault-infra
+  or its Terraform config at all.
 #>
 [CmdletBinding()]
 param(
@@ -31,20 +32,6 @@ $root          = $PSScriptRoot
 $image         = 'localhost/infra-lab/ansible-executor:latest'
 $network       = 'iaclab-integration'
 $podmanSocket  = '/run/user/1000/podman/podman.sock'
-$vaultInfraWin = (Resolve-Path (Join-Path $root '..\vault-infra')).Path
-
-# HOST_VAULT_INFRA_DIR is used by prepare.yml/destroy.yml as the bind-mount SOURCE
-# for a *sibling* terraform container, launched via `podman run` issued from
-# *inside* the executor (the Linux podman client, over CONTAINER_HOST) -- not the
-# Windows podman.exe client this script itself uses. The Windows client has
-# special-case handling that lets it accept a raw "F:\..." path for -v (that's how
-# the executor's own mounts below work), but the Linux client does not: it just
-# splits "-v SRC:DST" on ':', so a raw Windows drive-letter path ("F:\...") is
-# ambiguous with that separator ("invalid option type" from podman). Podman
-# Desktop's WSL2 machine already auto-mounts Windows drives at /mnt/<drive>/...
-# (standard WSL behavior), which has no colons and works from the Linux client --
-# so translate to that form here instead of passing the Windows path through.
-$vaultInfraDir = '/mnt/' + $vaultInfraWin.Substring(0, 1).ToLower() + ($vaultInfraWin.Substring(2) -replace '\\', '/')
 
 function Initialize-ScenarioNetwork {
   # The executor itself must join this network to run (delegated Vault reads,
@@ -79,20 +66,12 @@ function Invoke-Executor {
   if ($Interactive) { $runFlags += '-it' }
   # Mount the host's rootless podman socket so the executor's own `podman` CLI and
   # Molecule's podman driver both talk to the HOST engine -> everything they create
-  # lands as a sibling container, not nested inside the executor. vault-infra is
-  # also mounted (at a separate mount point, same host directory) so
-  # molecule/integration's prepare.yml/destroy.yml can run Terraform against their
-  # own ephemeral Vault sidecar and stage scratch files -- see prepare.yml for why
-  # both the executor's own mount and the HOST_VAULT_INFRA_DIR host-path string are
-  # needed (sibling containers resolve bind-mount sources against the host, not this
-  # container's filesystem).
+  # lands as a sibling container, not nested inside the executor.
   $runFlags += @(
     '-v', "$($podmanSocket):/run/podman/podman.sock:Z",
     '-e', 'CONTAINER_HOST=unix:///run/podman/podman.sock',
     '--network', $network,
-    '-v', "$($root):/work", '-w', '/work',
-    '-v', "$($vaultInfraWin):/vault-infra",
-    '-e', "HOST_VAULT_INFRA_DIR=$vaultInfraDir"
+    '-v', "$($root):/work", '-w', '/work'
   )
   Write-Host "==> [executor] $($Cmd -join ' ')" -ForegroundColor Cyan
   podman run @runFlags $image @Cmd
